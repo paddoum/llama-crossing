@@ -49,8 +49,12 @@ let acc = 0;
 let elapsed = 0;
 
 function frame(now) {
+  // Schedule first so a thrown error in one frame can't kill the loop.
+  requestAnimationFrame(frame);
   // Some environments (in-app browsers, emulated viewports) change size without firing resize.
   if (window.innerWidth !== lastW || window.innerHeight !== lastH) resize();
+  // A hidden/zero-size viewport (e.g. a pane still opening) gives a non-finite view.H.
+  if (!(view.H > 0) || !(view.scale > 0)) { last = now; return; }
   let dt = (now - last) / 1000;
   last = now;
   if (dt > 0.25) dt = 0.25; // tab was hidden; don't fast-forward
@@ -73,7 +77,5 @@ function frame(now) {
   ctx.beginPath(); ctx.rect(0, 0, view.W, view.H); ctx.clip();
   app.render(ctx, elapsed);
   ctx.restore();
-
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
