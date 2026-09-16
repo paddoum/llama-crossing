@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#2a7fc0">
+<title>Llama Crossing</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- In-game HUD -->
+<div id="hud" class="layer hidden">
+  <div id="hearts" class="hud-item" aria-label="Hearts"></div>
+  <button id="btn-pause" class="icon-btn" aria-label="Pause">❚❚</button>
+  <div id="carrots" class="hud-item">🥕 0</div>
+</div>
+
+<!-- Screens -->
+<div id="screen-title" class="layer screen active">
+  <h1>Llama<br>Crossing</h1>
+  <p class="tag">Row from A to B.<br>Dodge everything. Eat carrots.</p>
+  <button id="btn-play" class="btn primary">Play</button>
+  <button id="btn-mute" class="btn ghost">🔊 Sound on</button>
+</div>
+
+<div id="screen-levels" class="layer screen">
+  <h2>Choose a crossing</h2>
+  <div id="level-grid"></div>
+  <button id="btn-levels-back" class="btn ghost">Back</button>
+</div>
+
+<div id="screen-paused" class="layer screen dim">
+  <h2>Paused</h2>
+  <button id="btn-resume" class="btn primary">Resume</button>
+  <button id="btn-restart" class="btn">Restart</button>
+  <button id="btn-quit" class="btn ghost">Level select</button>
+</div>
+
+<div id="screen-complete" class="layer screen dim">
+  <h2>Made it!</h2>
+  <div id="complete-stars" class="stars"></div>
+  <p id="complete-info"></p>
+  <button id="btn-next" class="btn primary">Next crossing</button>
+  <button id="btn-complete-replay" class="btn">Replay</button>
+  <button id="btn-complete-levels" class="btn ghost">Level select</button>
+</div>
+
+<div id="screen-gameover" class="layer screen dim">
+  <h2>Capsized!</h2>
+  <p id="gameover-info"></p>
+  <button id="btn-retry" class="btn primary">Try again</button>
+  <button id="btn-gameover-levels" class="btn ghost">Level select</button>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
