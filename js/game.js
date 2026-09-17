@@ -6,7 +6,7 @@ import { updateLog, boatHits, applyWhirlpool, clampToBanks, dist } from './physi
 const STEER_RATE = 11;     // how quickly boat.x follows targetX
 const KEY_SPEED = 300;     // units/s for keyboard steering
 const HIT_INVULN = 1.6;
-const DOCK_VIEW_PAD = 170;  // world units above the finish line kept on screen (pier + flag), clear of the HUD
+const DOCK_VIEW_PAD = 100;  // world units above the finish line kept on screen (pier + flag); the HUD may overlay it
 
 export class Session {
   constructor(levelIndex, view, sfx) {
