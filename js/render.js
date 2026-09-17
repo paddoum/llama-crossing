@@ -23,7 +23,7 @@ export function renderSession(ctx, s, view, t) {
 
   drawWater(ctx, W, H, camY, t, s.level.speed);
   drawBanks(ctx, s.level, W, H, camY, toY);
-  drawShores(ctx, s.level, W, H, camY, toY);
+  drawShores(ctx, s.level, H, camY, toY);
 
   // Whirlpools sit under everything else
   for (const o of s.obstacles) if (o.type === 'whirlpool' && inView(o.y, camY, H, 80)) drawWhirlpool(ctx, o.x, toY(o.y), o, t);
@@ -152,7 +152,7 @@ function drawBush(ctx, x, y, r, tree) {
   }
 }
 
-function drawShores(ctx, level, W, H, camY, toY) {
+function drawShores(ctx, level, H, camY, toY) {
   // Start beach (A) below y = 0
   if (camY < 60) {
     const y = toY(0);
@@ -184,9 +184,9 @@ function drawShores(ctx, level, W, H, camY, toY) {
       ctx.fillStyle = i % 2 ? '#ffffff' : '#222';
       ctx.fillRect(x, y - 2, 12, 5);
     }
+    // Flag last: nothing is drawn over it, so its top stays visible.
+    // The river keeps running past the dock to the top of the view (no grass band).
     drawFlag(ctx, b.center, y - dockH - 8, 'B');
-    // Grass beyond the dock
-    ctx.fillStyle = C.grass; ctx.fillRect(-10, 0, W + 20, Math.max(0, y - dockH - 30));
   }
 }
 
