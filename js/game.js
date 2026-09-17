@@ -6,6 +6,7 @@ import { updateLog, boatHits, applyWhirlpool, clampToBanks, dist } from './physi
 const STEER_RATE = 11;     // how quickly boat.x follows targetX
 const KEY_SPEED = 300;     // units/s for keyboard steering
 const HIT_INVULN = 1.6;
+const DOCK_VIEW_PAD = 170;  // world units above the finish line kept on screen (pier + flag), clear of the HUD
 
 export class Session {
   constructor(levelIndex, view, sfx) {
@@ -29,7 +30,7 @@ export class Session {
     this.pull = 0;          // whirlpool pull FX 0..1
     this.status = 'playing'; // playing | won | lost
     this.endTimer = 0;
-    this.camY = this.boat.y - view.H * 0.3;
+    this.camY = this.cameraFor(this.boat.y);
   }
 
   // --- input ---
@@ -111,7 +112,15 @@ export class Session {
 
     this.updateParticles(dt);
     this.decayFx(dt);
-    this.camY = boat.y - this.view.H * 0.3;
+    this.camY = this.cameraFor(boat.y);
+  }
+
+  // Follow the boat, but once the pier reaches the top of the screen stop scrolling
+  // and let the boat travel up to it.
+  cameraFor(boatY) {
+    const follow = boatY - this.view.H * 0.3;
+    const pierTop = this.level.length + DOCK_VIEW_PAD - this.view.H;
+    return Math.min(follow, pierTop);
   }
 
   takeHit(o) {
