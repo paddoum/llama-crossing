@@ -76,16 +76,22 @@ export function drawWater(ctx, W, H, camY, t, speed = 100) {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
+  // Wave marks drift downstream (toward A) on their own, so the current stays
+  // visible even when the camera is pinned at the pier.
+  const flow = 45 + speed * 0.35;
+  const drift = t * flow;
   ctx.strokeStyle = C.wave;
   ctx.lineWidth = 2;
   ctx.lineCap = 'round';
   const spacing = 28;
-  const first = Math.floor(camY / spacing) * spacing;
-  for (let wy = first - spacing; wy < camY + H + spacing; wy += spacing) {
+  const k0 = Math.floor((camY + drift) / spacing) - 1;
+  const k1 = Math.ceil((camY + H + drift) / spacing) + 1;
+  for (let k = k0; k <= k1; k++) {
+    const wy = k * spacing - drift;          // world y of this mark right now
     const sy = H - (wy - camY);
-    const phase = wy * 0.37 + t * 1.6;
-    const len = 26 + hash(wy) * 30;
-    const x0 = (hash(wy * 1.7) * (W + 80)) - 40 + Math.sin(t * 0.7 + wy) * 6;
+    const phase = k * 0.37 + t * 1.6;
+    const len = 26 + hash(k) * 30;
+    const x0 = (hash(k * 1.7) * (W + 80)) - 40 + Math.sin(t * 0.7 + k) * 6;
     ctx.beginPath();
     for (let x = x0; x <= x0 + len; x += 6) {
       const y = sy + Math.sin(x * 0.12 + phase) * 2.2;
