@@ -3,6 +3,9 @@ import { LOGICAL_W } from './levels.js';
 import { Sfx } from './audio.js';
 import { Input } from './input.js';
 import { App } from './state.js';
+import { VERSION } from './version.js';
+
+document.getElementById('version').textContent = 'v' + VERSION;
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');

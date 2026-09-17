@@ -171,6 +171,18 @@ p { margin: 0; font-size: 17px; }
 .stars { font-size: 44px; letter-spacing: 6px; color: #ffd75e; text-shadow: 0 3px 0 rgba(0,0,0,.35); }
 .stars .off { color: rgba(255,255,255,.25); text-shadow: none; }
 
+#version {
+  position: fixed;
+  left: calc(10px + var(--safe-left));
+  bottom: calc(8px + var(--safe-bottom));
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: rgba(255, 248, 234, .75);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .6);
+  pointer-events: none;
+}
+
 #toast {
   position: fixed;
   left: 50%;
