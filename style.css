@@ -53,6 +53,7 @@ html, body {
   padding: calc(10px + var(--safe-top)) calc(12px + var(--safe-right)) 0 calc(12px + var(--safe-left));
   height: 0;
 }
+.hud-right { display: flex; align-items: center; gap: 8px; }
 .hud-item {
   pointer-events: none;
   background: rgba(10, 30, 50, 0.55);
