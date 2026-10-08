@@ -72,6 +72,18 @@ js/version.js         build label
 
 `state.js` is renderer-agnostic: it takes an object exposing `renderSession(session, t)` and `renderBackdrop(t)`, which is the whole seam between the two builds.
 
+## Verifying the 3D build
+
+Screenshot tools are unreliable against a WebGL canvas -- they routinely capture a stale frame, which looks exactly like a rendering bug (a missing boat, a river in the wrong place). To check what is really on screen, read the framebuffer instead:
+
+```js
+const gl = __r3d.renderer.getContext();
+const px = new Uint8Array(4);
+gl.readPixels(x, canvas.height - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+```
+
+`__app` and `__r3d` are exposed on `window` for this. The renderer sets `preserveDrawingBuffer: true` so the read is valid after the frame is drawn.
+
 ## Tuning the 3D camera
 
 The constants at the top of `js/render3d.js` (`FOV`, `CAM_BACK`, `CAM_UP`, `LOOK_AHEAD`) set the framing. Portrait is a tall, narrow window, so the camera sits high and well back and looks down ~29°; a shallower angle spends most of the screen on sky. The camera tracks the boat laterally on purpose, so whatever is near your lane stays on screen even though the far bank does not.

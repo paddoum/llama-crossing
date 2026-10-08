@@ -10,7 +10,8 @@ const COL = {
   water: 0x2f86c6, grass: 0x6cc04a, grassDark: 0x4f9c37, sand: 0xe8d38a,
   rock: 0x7d8791, log: 0x8b5a2b, logLight: 0xa7713a, logDark: 0x5f3a17,
   hull: 0xa35f2a, hullDark: 0x6e3d15, deck: 0xc98a4b,
-  llama: 0xfbf6ee, pink: 0xf2c9b0, scarf: 0xe2453b, ink: 0x241a12,
+  wool: 0xf2e6cf, skin: 0xe9d9bc, pink: 0xe8a9a3, ink: 0x2a2420,
+  blanketA: 0xc0392b, blanketB: 0x1f6f8b, scarf: 0xe2453b,
   virus: 0xe0479e, virusDark: 0x9c2a68, virusCore: 0xffd3ec, spit: 0xeaffd0,
   swirl: 0x0d2b52, white: 0xffffff, dark: 0x1a1a1a,
   waterFar: 0x2f86c6,
@@ -29,8 +30,12 @@ const M = {
   hull: mat(COL.hull),
   hullDark: mat(COL.hullDark),
   deck: mat(COL.deck),
-  llama: mat(COL.llama),
-  pink: mat(COL.pink),
+  wool: mat(COL.wool, { flatShading: true }),
+  skin: mat(COL.skin, { flatShading: false }),
+  pink: mat(COL.pink, { flatShading: false }),
+  blanketA: mat(COL.blanketA, { side: THREE.DoubleSide, flatShading: false }),
+  blanketB: mat(COL.blanketB, { side: THREE.DoubleSide, flatShading: false }),
+  white: mat(COL.white, { side: THREE.DoubleSide }),
   scarf: mat(COL.scarf),
   ink: mat(COL.ink),
   virus: mat(COL.virus),
@@ -38,7 +43,6 @@ const M = {
   virusCore: mat(COL.virusCore),
   spit: mat(COL.spit),
   swirl: mat(COL.swirl, { side: THREE.DoubleSide }),
-  white: mat(COL.white, { side: THREE.DoubleSide }),
   dark: mat(COL.dark),
   foliage: mat(COL.grassDark),
   foliageLight: mat(0x5fb444),
@@ -72,7 +76,12 @@ const FOV = 68, CAM_BACK = 150, CAM_UP = 170, LOOK_AHEAD = 150, LOOK_UP = 4;
 
 export class Renderer3D {
   constructor(canvas) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    // preserveDrawingBuffer keeps the last frame readable by gl.readPixels after
+    // it is drawn, which is the only dependable way to check what the 3D build
+    // actually put on screen (see "Verifying the 3D build" in the README).
+    this.renderer = new THREE.WebGLRenderer({
+      canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true,
+    });
     this.renderer.setClearColor(SKY);
 
     this.scene = new THREE.Scene();
@@ -327,8 +336,8 @@ export class Renderer3D {
     this.boat.userData.row(t, false);
 
     const a = t * 0.12;
-    this.camera.position.set(Math.sin(a) * 120, 74, CAM_BACK + 26 + Math.cos(a) * 40);
-    this.camera.lookAt(0, 10, -120);
+    this.camera.position.set(Math.sin(a) * 90, 96, 150 + Math.cos(a) * 34);
+    this.camera.lookAt(0, 14, -40);
 
     this.updateParticles(null, t);
     this.updateWater(this.camera.position.x, this.camera.position.z, t);
@@ -553,6 +562,171 @@ function makeVirus() {
   return g;
 }
 
+// Welds many small parts into one geometry. The llama is built from ~150 wool
+// puffs; without this it would cost ~150 draw calls a frame on a phone.
+function weld(parts) {
+  let total = 0;
+  const prepped = parts.map(({ geo, m }) => {
+    const g = geo.clone().applyMatrix4(m).toNonIndexed();
+    total += g.attributes.position.count;
+    return g;
+  });
+  const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3);
+  let o = 0;
+  for (const g of prepped) {
+    pos.set(g.attributes.position.array, o * 3);
+    nor.set(g.attributes.normal.array, o * 3);
+    o += g.attributes.position.count * 3 / 3;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  return out;
+}
+
+// Collects transformed geometry for one material, then welds it.
+function Welder() {
+  const parts = [];
+  const tmp = new THREE.Object3D();
+  return {
+    add(geo, pos, scale, rot) {
+      tmp.position.set(...(pos || [0, 0, 0]));
+      tmp.scale.set(...(scale || [1, 1, 1]));
+      tmp.rotation.set(...(rot || [0, 0, 0]));
+      tmp.updateMatrix();
+      parts.push({ geo, m: tmp.matrix.clone() });
+      return this;
+    },
+    mesh(material) { return new THREE.Mesh(weld(parts), material); },
+    empty() { return parts.length === 0; },
+  };
+}
+
+// Llama ported from the standalone model, seated in the boat (no legs: the
+// hull hides them) and scaled to the river's units. Faces +X locally, so the
+// group is yawed a quarter turn to look over the bow.
+function makeLlama() {
+  const g = new THREE.Group();
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const puff = (r) => new THREE.IcosahedronGeometry(r, 0);
+  const sph = (r, w = 14, h = 10) => new THREE.SphereGeometry(r, w, h);
+
+  // Body: one sphere wrapped in wool puffs, all welded together.
+  const BC = [0, 2.0, 0], BR = [1.45, 0.8, 0.78];
+  const bodyW = Welder();
+  bodyW.add(sph(1, 20, 14), BC, BR);
+  for (let i = 0; i < 80; i++) {
+    const th = rnd() * Math.PI * 0.72, ph = rnd() * Math.PI * 2;
+    const x = Math.cos(ph) * Math.sin(th), z = Math.sin(ph) * Math.sin(th), y = Math.cos(th);
+    if (Math.abs(x) < 0.62 && y > 0.35) continue;
+    bodyW.add(puff(0.18 + rnd() * 0.13),
+      [BC[0] + x * BR[0] * 0.93, BC[1] + y * BR[1] * 0.93, BC[2] + z * BR[2] * 0.93],
+      null, [rnd() * 3, rnd() * 3, 0]);
+  }
+  for (let i = 0; i < 16; i++) {
+    const ph = rnd() * Math.PI * 2;
+    bodyW.add(puff(0.24), [Math.cos(ph) * 0.8, 1.45, Math.sin(ph) * 0.45]);
+  }
+  g.add(bodyW.mesh(M.wool));
+
+  // Saddle blanket
+  const blanket = new THREE.Mesh(new THREE.SphereGeometry(1.08, 24, 10, 0, Math.PI * 2, 0, 1.15), M.blanketA);
+  blanket.position.set(...BC); blanket.scale.set(0.6, 0.9, 0.88);
+  g.add(blanket);
+  const stripe = new THREE.Mesh(new THREE.SphereGeometry(1.11, 24, 4, 0, Math.PI * 2, 0.98, 0.14), M.blanketB);
+  stripe.position.set(...BC); stripe.scale.set(0.6, 0.9, 0.88);
+  g.add(stripe);
+
+  // Tail
+  const tail = new THREE.Group();
+  tail.position.set(-1.45, 2.15, 0);
+  const tailW = Welder();
+  for (let i = 0; i < 6; i++) tailW.add(puff(0.18 + rnd() * 0.08), [-0.1 - i * 0.05, -i * 0.1, (rnd() - 0.5) * 0.15]);
+  tail.add(tailW.mesh(M.wool));
+  g.add(tail);
+
+  // Neck
+  const neck = new THREE.Group();
+  neck.position.set(1.05, 2.25, 0);
+  neck.rotation.z = -0.16;
+  const neckW = Welder();
+  neckW.add(new THREE.CylinderGeometry(0.3, 0.42, 1.7, 12), [0, 0.8, 0]);
+  for (let i = 0; i < 30; i++) {
+    const a = rnd() * Math.PI * 2, h = rnd() * 1.55, r = 0.4 - h * 0.07;
+    neckW.add(puff(0.18 + rnd() * 0.08), [Math.cos(a) * r, h + 0.05, Math.sin(a) * r]);
+  }
+  neck.add(neckW.mesh(M.wool));
+  g.add(neck);
+
+  // Head
+  const head = new THREE.Group();
+  head.position.set(0.12, 1.72, 0);
+  neck.add(head);
+  const skullW = Welder();
+  skullW.add(sph(1, 16, 12), [0, 0, 0], [0.5, 0.42, 0.4]);
+  skullW.add(sph(1, 14, 10), [0.42, -0.12, 0], [0.34, 0.25, 0.27]);
+  head.add(skullW.mesh(M.skin));
+  const jaw = new THREE.Mesh(sph(1, 12, 8), M.skin);
+  jaw.position.set(0.36, -0.27, 0); jaw.scale.set(0.24, 0.12, 0.2);
+  head.add(jaw);
+  const nostrils = Welder();
+  nostrils.add(sph(0.035, 6, 5), [0.74, -0.06, 0.09]);
+  nostrils.add(sph(0.035, 6, 5), [0.74, -0.06, -0.09]);
+  head.add(nostrils.mesh(M.ink));
+  const headW = Welder();
+  for (let i = 0; i < 9; i++) headW.add(puff(0.12 + rnd() * 0.05), [-0.12 + rnd() * 0.25, 0.36 + rnd() * 0.08, (rnd() - 0.5) * 0.35]);
+  head.add(headW.mesh(M.wool));
+
+  const eyes = [], ears = [];
+  for (const sgn of [1, -1]) {
+    const eye = new THREE.Mesh(sph(0.075, 8, 6), M.ink);
+    eye.position.set(0.27, 0.1, 0.29 * sgn);
+    head.add(eye);
+    eyes.push(eye);
+    const glint = new THREE.Mesh(sph(0.022, 5, 4), M.white);
+    glint.position.set(0.33, 0.13, 0.3 * sgn);
+    head.add(glint);
+
+    const ear = new THREE.Group();
+    ear.position.set(-0.08, 0.34, 0.2 * sgn);
+    ear.rotation.set(0.25 * sgn, 0, -0.15);
+    head.add(ear);
+    ear.add(meshAt(new THREE.ConeGeometry(0.11, 0.5, 8), M.skin, [0, 0.25, 0]));
+    ear.add(meshAt(new THREE.ConeGeometry(0.06, 0.36, 7), M.pink, [0.05, 0.22, 0]));
+    ears.push(ear);
+  }
+
+  // Idle life: chewing, a slow look around, tail, blinks and ear twitches.
+  let blinkAt = 2, twitchAt = 3, twitchEar = 0;
+  const animate = (t, celebrating) => {
+    const sp = celebrating ? 2.2 : 1;
+    jaw.position.y = -0.27 + Math.sin(t * 7) * 0.025;
+    jaw.rotation.y = Math.sin(t * 3.5) * 0.12;
+    neck.rotation.z = -0.16 + Math.sin(t * 0.8 * sp) * 0.05;
+    head.rotation.y = Math.sin(t * 0.45 * sp) * 0.25;
+    tail.rotation.y = Math.sin(t * 2.2 * sp) * 0.25;
+    if (t > blinkAt) {
+      const k = Math.min(1, (t - blinkAt) / 0.15);
+      for (const e of eyes) e.scale.y = Math.abs(1 - 2 * k) || 0.1;
+      if (k >= 1) { blinkAt = t + 2 + Math.random() * 3; for (const e of eyes) e.scale.y = 1; }
+    }
+    if (t > twitchAt) {
+      const k = (t - twitchAt) / 0.35;
+      ears[twitchEar].rotation.z = -0.15 - Math.sin(Math.min(k, 1) * Math.PI) * 0.5;
+      if (k >= 1) { twitchAt = t + 1.5 + Math.random() * 3; twitchEar = Math.random() < 0.5 ? 0 : 1; }
+    }
+  };
+  return { group: g, animate };
+}
+
+function meshAt(geo, material, pos) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(...pos);
+  return m;
+}
+
 // Llama in a rowing boat. userData.row(t, celebrating) animates the oars.
 function makeLlamaBoat() {
   const g = new THREE.Group();
@@ -590,39 +764,12 @@ function makeLlamaBoat() {
     oars.push({ oar, s });
   }
 
-  // Llama
-  const llama = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(9, 8, 6), M.llama);
-  body.scale.set(1, 0.85, 1.15);
-  body.position.y = 13;
-  llama.add(body);
-  const blanket = new THREE.Mesh(new THREE.BoxGeometry(15, 5, 13), M.scarf);
-  blanket.position.y = 12;
-  llama.add(blanket);
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 4.2, 20, 7), M.llama);
-  neck.position.set(0, 26, -1.5);
-  neck.rotation.x = -0.12;
-  llama.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(5.6, 8, 6), M.llama);
-  head.scale.set(1, 0.95, 1.25);
-  head.position.set(0, 37, -3);
-  llama.add(head);
-  const snout = new THREE.Mesh(new THREE.SphereGeometry(3, 7, 5), M.pink);
-  snout.scale.set(1, 0.8, 1.1);
-  snout.position.set(0, 35.5, -8.5);
-  llama.add(snout);
-  for (const s of [-1, 1]) {
-    const ear = new THREE.Mesh(new THREE.ConeGeometry(1.9, 7, 5), M.llama);
-    ear.position.set(s * 3.2, 43, -2);
-    ear.rotation.z = s * 0.3;
-    llama.add(ear);
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(1.1, 6, 5), M.ink);
-    eye.position.set(s * 3.1, 38.5, -7);
-    llama.add(eye);
-  }
-  const scarf = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.4, 4, 8), M.scarf);
-  scarf.position.set(0, 22, -2);
-  llama.add(scarf);
+  // Llama, seated: scaled to river units and yawed so it faces the bow (-Z).
+  const LLAMA_SCALE = 9.5;
+  const { group: llama, animate: liven } = makeLlama();
+  llama.scale.setScalar(LLAMA_SCALE);
+  llama.rotation.y = Math.PI / 2;
+  llama.position.set(0, -3.4, 3);
   g.add(llama);
 
   g.userData.row = (t, celebrating) => {
@@ -631,7 +778,8 @@ function makeLlamaBoat() {
       oar.rotation.x = sw * 0.5;
       oar.rotation.z = s * sw * 0.12;
     }
-    llama.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
+    llama.position.y = -3.4 + (celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0);
+    liven(t, celebrating);
   };
   return g;
 }
