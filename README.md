@@ -72,6 +72,14 @@ js/version.js         build label
 
 `state.js` is renderer-agnostic: it takes an object exposing `renderSession(session, t)` and `renderBackdrop(t)`, which is the whole seam between the two builds.
 
+## Water
+
+The surface is a custom `ShaderMaterial` in `js/render3d.js`. Four directional sine waves are summed in the vertex shader and the normal comes from their analytic gradient, so there is no CPU work per frame and no vertex buffer upload. The waves are anchored to world space, so the sheet can follow the camera without the surface swimming, and its amplitude tapers at the rim to meet the flat far-field plane invisibly.
+
+The fragment shader adds a depth-tinted base, sun glitter, a sky-coloured fresnel at grazing angles (what reads as "wet"), foam on the crests, and foam along both banks computed from the level's own meander — the same `meanderAmp` / `meanderLen` / `riverWidth` the gameplay uses, passed in as uniforms. It uses three's own fog and colour-space chunks so it matches the rest of the scene exactly.
+
+`WAVES` in `js/render3d.js` is the single definition of the wave set: it generates the GLSL **and** the JS `waveAt()` that floats the boat, the spit and the foam particles. Edit it in one place and both stay in sync.
+
 ## Verifying the 3D build
 
 Screenshot tools are unreliable against a WebGL canvas -- they routinely capture a stale frame, which looks exactly like a rendering bug (a missing boat, a river in the wrong place). To check what is really on screen, read the framebuffer instead:

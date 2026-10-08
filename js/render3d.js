@@ -51,22 +51,131 @@ const M = {
 // Deterministic jitter, same trick the 2D renderer uses.
 const hash = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); };
 
-// --- water -------------------------------------------------------------
-const WATER_SIZE = 1500, WATER_SEG = 54, FLOW = 34;
-const WATER_HALF = WATER_SIZE / 2;
+// --- water ---------------------------------------------------------------
+// The surface is a GPU-displaced sheet that follows the camera, plus a flat
+// plane for the far field. Waves are anchored to world space, so nothing
+// swims when the sheet moves, and the sheet's amplitude tapers at its rim so
+// it meets the far plane invisibly.
+const WATER_SIZE = 1800, WATER_SEG = 100, WATER_HALF = WATER_SIZE / 2;
+const FLOW = 34;
 
-// Waves fade out at the rim of the near sheet so it meets the flat far water
-// without a seam.
-function rimFade(lx, lz) {
-  const d = Math.max(Math.abs(lx), Math.abs(lz)) / WATER_HALF;
-  return Math.max(0, Math.min(1, 1 - (d - 0.7) / 0.3));
-}
+// Four directional sines. KEEP IN SYNC with wave() in the vertex shader below:
+// the boat, the spit and the foam particles all ride on this JS copy.
+const WAVES = [
+  { a: 2.10, kx: 0.031, kz: 0.018, w: 0.35 },
+  { a: 1.50, kx: -0.011, kz: 0.052, w: 0.21 },
+  { a: 0.70, kx: 0.085, kz: 0.085, w: 0.70 },
+  { a: 0.35, kx: 0.170, kz: -0.120, w: 1.30 },
+];
 
 function waveAt(x, z, t) {
-  const zf = z + t * FLOW;
-  return Math.sin(x * 0.031 + zf * 0.018) * 2.1
-       + Math.sin(zf * 0.052 - x * 0.011) * 1.5
-       + Math.sin((x + zf) * 0.085 + t * 0.7) * 0.7;
+  const q = z + t * FLOW;
+  let h = 0;
+  for (const { a, kx, kz, w } of WAVES) h += a * Math.sin(kx * x + kz * q + t * w);
+  return h;
+}
+
+const WAVE_GLSL = WAVES.map(({ a, kx, kz, w }) =>
+  `  ph = ${kx.toFixed(3)} * q.x + ${kz.toFixed(3)} * q.y + uTime * ${w.toFixed(2)};
+  h += ${a.toFixed(2)} * sin(ph);
+  g += ${a.toFixed(2)} * cos(ph) * vec2(${kx.toFixed(3)}, ${kz.toFixed(3)});`).join('\n');
+
+const WATER_VERT = `
+#include <fog_pars_vertex>
+uniform float uTime, uFlow, uAmp, uTaperHalf;
+varying vec3 vWorld;
+varying vec3 vWNormal;
+varying float vCrest;
+
+float wave(vec2 p, out vec2 g) {
+  vec2 q = vec2(p.x, p.y + uFlow * uTime);
+  float h = 0.0, ph;
+  g = vec2(0.0);
+${WAVE_GLSL}
+  return h;
+}
+
+void main() {
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  // Flatten towards the rim of the sheet so it blends into the far plane.
+  float edge = max(abs(position.x), abs(position.y)) / uTaperHalf;
+  float amp = uAmp * (1.0 - smoothstep(0.55, 1.0, edge));
+  vec2 g;
+  float h = wave(world.xz, g);
+  world.y += amp * h;
+  vWorld = world.xyz;
+  vCrest = amp * h;
+  vWNormal = normalize(vec3(-amp * g.x, 1.0, -amp * g.y));
+  vec4 mvPosition = viewMatrix * world;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}`;
+
+const WATER_FRAG = `
+#include <fog_pars_fragment>
+uniform vec3 uSunDir, uSunCol, uSkyCol, uGroundCol, uShallow, uDeep, uFoam, uCamPos;
+uniform float uTime, uMeanderAmp, uMeanderLen, uHalfWidth, uShore;
+varying vec3 vWorld;
+varying vec3 vWNormal;
+varying float vCrest;
+
+void main() {
+  vec3 N = normalize(vWNormal);
+  vec3 V = normalize(uCamPos - vWorld);
+
+  vec3 ambient = mix(uGroundCol, uSkyCol, N.y * 0.5 + 0.5);
+  float diff = max(dot(N, uSunDir), 0.0);
+  vec3 base = mix(uDeep, uShallow, smoothstep(-2.0, 2.2, vCrest));
+  vec3 col = base * (ambient * 0.78 + uSunCol * diff * 0.45);
+
+  // Sun glitter on the slopes facing the light.
+  vec3 H = normalize(uSunDir + V);
+  col += uSunCol * pow(max(dot(N, H), 0.0), 110.0) * 1.6;
+
+  // Grazing angles pick up the sky, which is what reads as "wet".
+  col = mix(col, uSkyCol, pow(1.0 - max(dot(N, V), 0.0), 4.0) * 0.5);
+
+  // Foam on the crests.
+  col = mix(col, uFoam, smoothstep(1.6, 3.0, vCrest) * 0.55);
+
+  // Foam along both banks, following the level's meander.
+  float centre = uMeanderAmp * sin((-vWorld.z) / uMeanderLen * 6.2831853);
+  float edge = abs(abs(vWorld.x - centre) - uHalfWidth);
+  float wobble = sin(vWorld.z * 0.21 + uTime * 1.7) * 2.6 + sin(vWorld.z * 0.07 - uTime * 0.9) * 2.0;
+  col = mix(col, uFoam, (1.0 - smoothstep(0.0, 15.0, edge + wobble)) * uShore);
+
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}`;
+
+function makeWaterMaterial({ amp, shore }) {
+  return new THREE.ShaderMaterial({
+    fog: true,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      {
+        uTime: { value: 0 },
+        uFlow: { value: FLOW },
+        uAmp: { value: amp },
+        uTaperHalf: { value: WATER_HALF },
+        uShore: { value: shore },
+        uCamPos: { value: new THREE.Vector3() },
+        uSunDir: { value: new THREE.Vector3(-180, 320, 160).normalize() },
+        uSunCol: { value: new THREE.Color(0xffffff) },
+        uSkyCol: { value: new THREE.Color(0xdff3ff) },
+        uGroundCol: { value: new THREE.Color(0x3f6a8a) },
+        uShallow: { value: new THREE.Color(0x4fa3d8) },
+        uDeep: { value: new THREE.Color(0x1f5f92) },
+        uFoam: { value: new THREE.Color(0xeaf6ff) },
+        uMeanderAmp: { value: 0 },
+        uMeanderLen: { value: 900 },
+        uHalfWidth: { value: 130 },
+      },
+    ]),
+    vertexShader: WATER_VERT,
+    fragmentShader: WATER_FRAG,
+  });
 }
 
 // --- camera ------------------------------------------------------------
@@ -131,26 +240,39 @@ export class Renderer3D {
   }
 
   makeWater() {
+    // The sheet is built in the XY plane so the vertex shader can read
+    // position.xy as its own local grid, then laid flat by the model matrix.
     const g = new THREE.PlaneGeometry(WATER_SIZE, WATER_SIZE, WATER_SEG, WATER_SEG);
-    g.rotateX(-Math.PI / 2);
-    this.water = new THREE.Mesh(g, mat(COL.water));
-    const fg = new THREE.PlaneGeometry(26000, 26000);
-    fg.rotateX(-Math.PI / 2);
-    this.farWater = new THREE.Mesh(fg, mat(COL.waterFar));
-    this.farWater.position.y = -1.2;
+    this.waterMat = makeWaterMaterial({ amp: 1, shore: 0.8 });
+    this.water = new THREE.Mesh(g, this.waterMat);
+    this.water.rotation.x = -Math.PI / 2;
+    this.water.frustumCulled = false;
+
+    this.farWaterMat = makeWaterMaterial({ amp: 0, shore: 0 });
+    this.farWater = new THREE.Mesh(new THREE.PlaneGeometry(26000, 26000), this.farWaterMat);
+    this.farWater.rotation.x = -Math.PI / 2;
+    this.farWater.frustumCulled = false;
   }
 
   updateWater(cx, cz, t) {
     const cell = WATER_SIZE / WATER_SEG;
-    // Snap the sheet to its own grid so the waves do not swim with the camera.
-    const sx = Math.round(cx / cell) * cell, sz = Math.round(cz / cell) * cell;
-    this.water.position.set(sx, 0, sz);
+    // Snap the sheet to its own grid; the waves are world-anchored either way,
+    // but snapping keeps the silhouette of the triangles steady.
+    this.water.position.set(Math.round(cx / cell) * cell, 0, Math.round(cz / cell) * cell);
     this.farWater.position.set(cx, -1.2, cz);
-    const arr = this.water.geometry.attributes.position.array;
-    for (let i = 0; i < arr.length; i += 3) {
-      arr[i + 1] = waveAt(arr[i] + sx, arr[i + 2] + sz, t) * rimFade(arr[i], arr[i + 2]);
+    for (const m of [this.waterMat, this.farWaterMat]) {
+      m.uniforms.uTime.value = t;
+      m.uniforms.uCamPos.value.copy(this.camera.position);
     }
-    this.water.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // Shore foam has to follow the level's own meander.
+  setRiverShape(level) {
+    const u = this.waterMat.uniforms;
+    u.uMeanderAmp.value = level.meanderAmp || 0;
+    u.uMeanderLen.value = level.meanderLen || 900;
+    u.uHalfWidth.value = level.riverWidth / 2;
+    u.uFlow.value = FLOW + (level.speed || 110) * 0.22;
   }
 
   makeParticles() {
@@ -188,6 +310,26 @@ export class Renderer3D {
     geo.attributes.position.needsUpdate = true;
     geo.attributes.color.needsUpdate = true;
     geo.setDrawRange(0, max);
+  }
+
+  updateViruses(session, t) {
+    if (!this.virusMeshes.length) return;
+    const m = this._m4 || (this._m4 = new THREE.Matrix4());
+    const q = this._q || (this._q = new THREE.Quaternion());
+    const e = this._e || (this._e = new THREE.Euler());
+    const p = this._v3 || (this._v3 = new THREE.Vector3());
+    const one = this._one || (this._one = new THREE.Vector3(1, 1, 1));
+    const zero = this._zero || (this._zero = new THREE.Vector3(0, 0, 0));
+    session.viruses.forEach((v, i) => {
+      if (v.dead) {
+        m.compose(p.set(0, -9999, 0), q.identity(), zero);
+      } else {
+        e.set(v.spin * 0.6, v.spin, v.spin * 0.3);
+        m.compose(p.set(v.x - HALF, 11 + Math.sin(t * 2.4 + v.phase) * 2.2, -v.y), q.setFromEuler(e), one);
+      }
+      for (const mesh of this.virusMeshes) mesh.setMatrixAt(i, m);
+    });
+    for (const mesh of this.virusMeshes) mesh.instanceMatrix.needsUpdate = true;
   }
 
   // Spit is pooled: a handful of blobs reused for the whole run.
@@ -232,18 +374,13 @@ export class Renderer3D {
       g.add(mesh);
     }
 
-    this.virusMeshes = [];
-    const proto = makeVirus();
-    for (const v of session.viruses) {
-      const mesh = proto.clone();
-      mesh.position.set(v.x - HALF, 11, -v.y);
-      this.virusMeshes.push({ v, mesh });
-      g.add(mesh);
-    }
+    this.virusMeshes = session.viruses.length ? buildViruses(session.viruses.length) : [];
+    for (const m of this.virusMeshes) g.add(m);
 
     this.scene.add(g);
     this.levelGroup = g;
     this.session = session;
+    this.setRiverShape(level);
   }
 
   disposeLevel() {
@@ -280,13 +417,7 @@ export class Renderer3D {
       mesh.rotation.y = -o.spin;
       mesh.children[0].rotation.y = o.spin * 1.7;
     }
-    for (const { v, mesh } of this.virusMeshes) {
-      mesh.visible = !v.dead;
-      if (v.dead) continue;
-      mesh.position.x = v.x - HALF;
-      mesh.position.y = 11 + Math.sin(t * 2.4 + v.phase) * 2.2;
-      mesh.rotation.set(v.spin * 0.6, v.spin, v.spin * 0.3);
-    }
+    this.updateViruses(session, t);
     this.updateSpits(session, t);
 
     this.updateParticles(session, t);
@@ -323,6 +454,7 @@ export class Renderer3D {
 
   renderBackdrop(t) {
     this.lastT = t;
+    this.setRiverShape(MENU_RIVER);
     if (this.levelGroup) this.levelGroup.visible = false;
     this.menuGroup.visible = true;
     this.progress.classList.add('hidden');
@@ -461,22 +593,23 @@ function buildDock(level) {
   deck.position.set(cx, 11, z - 19);
   g.add(deck);
 
-  for (let x = -(w + 44) / 2 + 6; x < (w + 44) / 2; x += 15) {
-    const plank = new THREE.Mesh(new THREE.BoxGeometry(11, 2, 32), M.logLight);
-    plank.position.set(cx + x, 15.4, z - 19);
-    g.add(plank);
-  }
+  const planks = Welder();
+  const plankGeo = new THREE.BoxGeometry(11, 2, 32);
+  for (let x = -(w + 44) / 2 + 6; x < (w + 44) / 2; x += 15) planks.add(plankGeo, [cx + x, 15.4, z - 19]);
+  g.add(planks.mesh(M.logLight));
   for (const px of [b.left - HALF + 6, cx, b.right - HALF - 6]) {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 22, 6), M.logDark);
     post.position.set(px, 2, z - 3);
     g.add(post);
   }
   // finish line
+  const pale = Welder(), ink = Welder();
+  const segGeo = new THREE.BoxGeometry(13, 1.2, 7);
   for (let x = b.left - HALF, i = 0; x < b.right - HALF; x += 13, i++) {
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(13, 1.2, 7), i % 2 ? M.white : M.dark);
-    seg.position.set(x + 6.5, 1.2, z + 2);
-    g.add(seg);
+    (i % 2 ? pale : ink).add(segGeo, [x + 6.5, 1.2, z + 2]);
   }
+  if (!pale.empty()) g.add(pale.mesh(M.white));
+  if (!ink.empty()) g.add(ink.mesh(M.dark));
   // B flag
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 54, 6), M.white);
   pole.position.set(cx, 42, z - 30);
@@ -532,34 +665,39 @@ function makeWhirlpool(o) {
   return g;
 }
 
-function makeVirus() {
-  const g = new THREE.Group();
-  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(11, 0), M.virus);
-  g.add(core);
+// All of a level's viruses in three instanced draw calls. Each one is a
+// welded core, a welded set of spikes and knobs, and the pale surface dots.
+function buildViruses(count) {
+  const coreGeo = new THREE.IcosahedronGeometry(11, 0);
   const spikeGeo = new THREE.ConeGeometry(2.4, 8, 4);
   const knobGeo = new THREE.SphereGeometry(2.6, 5, 4);
-  // Spikes on the icosahedron's own vertex directions, so they sit on the hull.
+
+  // Spikes point along the hull's own vertex directions so they sit flush.
   const dirs = [];
-  const pos = core.geometry.attributes.position;
+  const pos = coreGeo.attributes.position;
+  const up = new THREE.Vector3(0, 1, 0);
   for (let i = 0; i < pos.count; i += 3) {
     const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize();
     if (!dirs.some((d) => d.dot(v) > 0.9)) dirs.push(v);
   }
+  const spikes = Welder();
   for (const d of dirs) {
-    const spike = new THREE.Mesh(spikeGeo, M.virusDark);
-    spike.position.copy(d).multiplyScalar(13);
-    spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
-    g.add(spike);
-    const knob = new THREE.Mesh(knobGeo, M.virusDark);
-    knob.position.copy(d).multiplyScalar(18);
-    g.add(knob);
+    const q = new THREE.Quaternion().setFromUnitVectors(up, d);
+    spikes.add(spikeGeo, d.clone().multiplyScalar(13).toArray(), null, null, q);
+    spikes.add(knobGeo, d.clone().multiplyScalar(18).toArray());
   }
+  const dots = Welder();
   for (const [a, b, c] of [[-4, -3, 8], [5, 4, 8], [0, 6, 8.5]]) {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(2.4, 5, 4), M.virusCore);
-    dot.position.set(a, b, c);
-    g.add(dot);
+    dots.add(new THREE.SphereGeometry(2.4, 5, 4), [a, b, c]);
   }
-  return g;
+
+  const meshes = [
+    new THREE.InstancedMesh(coreGeo, M.virus, count),
+    new THREE.InstancedMesh(weld([{ geo: spikes.geo(), m: new THREE.Matrix4() }]), M.virusDark, count),
+    new THREE.InstancedMesh(dots.geo(), M.virusCore, count),
+  ];
+  for (const m of meshes) { m.frustumCulled = false; m.count = count; }
+  return meshes;
 }
 
 // Welds many small parts into one geometry. The llama is built from ~150 wool
@@ -590,14 +728,16 @@ function Welder() {
   const parts = [];
   const tmp = new THREE.Object3D();
   return {
-    add(geo, pos, scale, rot) {
+    add(geo, pos, scale, rot, quat) {
       tmp.position.set(...(pos || [0, 0, 0]));
       tmp.scale.set(...(scale || [1, 1, 1]));
-      tmp.rotation.set(...(rot || [0, 0, 0]));
+      if (quat) tmp.quaternion.copy(quat);
+      else tmp.rotation.set(...(rot || [0, 0, 0]));
       tmp.updateMatrix();
       parts.push({ geo, m: tmp.matrix.clone() });
       return this;
     },
+    geo() { return weld(parts); },
     mesh(material) { return new THREE.Mesh(weld(parts), material); },
     empty() { return parts.length === 0; },
   };
@@ -785,8 +925,10 @@ function makeLlamaBoat() {
 }
 
 // Straight stretch of river shown behind the menus.
+const MENU_RIVER = { riverWidth: 260, meanderAmp: 22, meanderLen: 760, speed: 110 };
+
 function buildMenuRiver() {
-  const level = { riverWidth: 260, meanderAmp: 22, meanderLen: 760 };
+  const level = MENU_RIVER;
   const g = new THREE.Group();
   g.add(buildBanks(level, -700, 1500));
   g.add(buildProps(level, -680, 1480));
