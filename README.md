@@ -1,6 +1,6 @@
 # Llama Crossing
 
-A mobile-first web game: a llama rows a boat from shore **A** to dock **B**, dodging rocks, drifting logs and whirlpools, and spitting at the viruses floating in the river. No build step and no image assets -- everything is drawn in code.
+A mobile-first web game: a llama sails from shore **A** to dock **B**, dodging rocks, drifting logs and whirlpools, and spitting at the viruses floating in the river. No build step and no image assets -- everything is drawn in code.
 
 Two builds share one simulation:
 

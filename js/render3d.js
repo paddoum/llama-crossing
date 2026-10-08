@@ -9,7 +9,7 @@ const SKY = 0x9ed9f3;
 const COL = {
   water: 0x2f86c6, grass: 0x6cc04a, grassDark: 0x4f9c37, sand: 0xe8d38a,
   rock: 0x7d8791, log: 0x8b5a2b, logLight: 0xa7713a, logDark: 0x5f3a17,
-  hull: 0xa35f2a, hullDark: 0x6e3d15, deck: 0xc98a4b,
+  hull: 0xa35f2a, hullDark: 0x6e3d15, deck: 0xc98a4b, sail: 0xfdf6e8, mast: 0x8a6136,
   wool: 0xf2e6cf, skin: 0xe9d9bc, pink: 0xe8a9a3, ink: 0x2a2420,
   blanketA: 0xc0392b, blanketB: 0x1f6f8b, scarf: 0xe2453b,
   virus: 0xe0479e, virusDark: 0x9c2a68, virusCore: 0xffd3ec, spit: 0xeaffd0,
@@ -30,6 +30,11 @@ const M = {
   hull: mat(COL.hull),
   hullDark: mat(COL.hullDark),
   deck: mat(COL.deck),
+  // Canvas catches light from every side; without the lift the face turned
+  // away from the sun reads as a grey shadow rather than a sail.
+  sail: mat(COL.sail, { side: THREE.DoubleSide, flatShading: false, emissive: 0x9a927a }),
+  mast: mat(COL.mast),
+  sailStripe: mat(COL.scarf, { side: THREE.DoubleSide, flatShading: false, emissive: 0x4a1410 }),
   wool: mat(COL.wool, { flatShading: true }),
   skin: mat(COL.skin, { flatShading: false }),
   pink: mat(COL.pink, { flatShading: false }),
@@ -410,7 +415,7 @@ export class Renderer3D {
     this.boat.position.set(bx, h + 2, bz);
     this.boat.rotation.set(Math.atan(slope) * 0.8, -b.lean * 0.3, -b.lean * 0.45);
     this.boat.visible = !(b.invuln > 0 && Math.floor(t * 14) % 2 === 0);
-    this.boat.userData.row(t, session.status === 'won');
+    this.boat.userData.rig(t, session.status === 'won', b.lean);
 
     for (const { o, mesh } of this.logMeshes) mesh.position.x = o.x - HALF;
     for (const { o, mesh } of this.swirlMeshes) {
@@ -465,7 +470,7 @@ export class Renderer3D {
     this.boat.position.set(bx, h + 2, bz);
     this.boat.rotation.set(0, Math.sin(t * 0.35) * 0.25, Math.cos(t * 0.35) * 0.12);
     this.boat.visible = true;
-    this.boat.userData.row(t, false);
+    this.boat.userData.rig(t, false, Math.sin(t * 0.35) * 0.3);
 
     const a = t * 0.12;
     this.camera.position.set(Math.sin(a) * 90, 96, 150 + Math.cos(a) * 34);
@@ -700,6 +705,30 @@ function buildViruses(count) {
   return meshes;
 }
 
+// A bermuda sail: luff up the mast, foot along the boom, bellied out by the
+// wind. v0/v1 cut a horizontal band out of it, which is how the stripe is made.
+function makeSailGeometry(boomLen, mastH, depth, v0 = 0, v1 = 1, puff = 1) {
+  const SEG = 9;
+  const P = (u, v) => {
+    const chord = boomLen * (1 - v * 0.84);
+    const belly = Math.sin(Math.PI * u) * Math.sin(Math.PI * v * 0.92) * depth * puff;
+    return [belly, v * mastH, u * chord];
+  };
+  const pos = [];
+  for (let i = 0; i < SEG; i++) {
+    for (let j = 0; j < SEG; j++) {
+      const u0 = i / SEG, u1 = (i + 1) / SEG;
+      const a = v0 + (v1 - v0) * (j / SEG), b = v0 + (v1 - v0) * ((j + 1) / SEG);
+      const p00 = P(u0, a), p10 = P(u1, a), p11 = P(u1, b), p01 = P(u0, b);
+      pos.push(...p00, ...p10, ...p11, ...p00, ...p11, ...p01);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.computeVertexNormals();
+  return g;
+}
+
 // Welds many small parts into one geometry. The llama is built from ~150 wool
 // puffs; without this it would cost ~150 draw calls a frame on a phone.
 function weld(parts) {
@@ -867,7 +896,7 @@ function meshAt(geo, material, pos) {
   return m;
 }
 
-// Llama in a rowing boat. userData.row(t, celebrating) animates the oars.
+// Llama in a sailing boat. userData.rig(t, celebrating, lean) trims the sail.
 function makeLlamaBoat() {
   const g = new THREE.Group();
 
@@ -888,21 +917,24 @@ function makeLlamaBoat() {
   deck.position.y = 6.6;
   g.add(deck);
 
-  // Oars
-  const oars = [];
-  for (const s of [-1, 1]) {
-    const oar = new THREE.Group();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 30, 5), M.logDark);
-    shaft.rotation.z = Math.PI / 2;
-    shaft.position.x = s * 15;
-    oar.add(shaft);
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(9, 1.2, 6), M.log);
-    blade.position.set(s * 30, 0, 0);
-    oar.add(blade);
-    oar.position.set(0, 8, 2);
-    g.add(oar);
-    oars.push({ oar, s });
-  }
+  // Rig. The mast sits forward and the boom is sheeted out to starboard, so
+  // the sail never masks the stretch of river the camera is looking down.
+  const MAST_H = 58, BOOM_LEN = 38;
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2, MAST_H, 7), M.mast);
+  mast.position.set(0, 8 + MAST_H / 2, -5);
+  g.add(mast);
+
+  const rig = new THREE.Group();
+  rig.position.set(0, 9, -5);
+  g.add(rig);
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, BOOM_LEN, 6), M.mast);
+  boom.rotation.x = Math.PI / 2;
+  boom.position.set(0, 0, BOOM_LEN / 2);
+  rig.add(boom);
+  const sail = new THREE.Mesh(makeSailGeometry(BOOM_LEN, MAST_H - 4, 6), M.sail);
+  rig.add(sail);
+  const stripe = new THREE.Mesh(makeSailGeometry(BOOM_LEN, MAST_H - 4, 6, 0.4, 0.54, 1.04), M.sailStripe);
+  rig.add(stripe);
 
   // Llama, seated: scaled to river units and yawed so it faces the bow (-Z).
   const LLAMA_SCALE = 9.5;
@@ -912,12 +944,13 @@ function makeLlamaBoat() {
   llama.position.set(0, -3.4, 3);
   g.add(llama);
 
-  g.userData.row = (t, celebrating) => {
-    const sw = Math.sin(t * (celebrating ? 14 : 7));
-    for (const { oar, s } of oars) {
-      oar.rotation.x = sw * 0.5;
-      oar.rotation.z = s * sw * 0.12;
-    }
+  // Sheet the boom with the turn and let the sail breathe.
+  g.userData.rig = (t, celebrating, lean = 0) => {
+    const gust = Math.sin(t * 0.7) * 0.05 + Math.sin(t * 1.9) * 0.02;
+    rig.rotation.y = 0.95 + gust - lean * 0.3;
+    const belly = 1 + Math.sin(t * 1.6) * 0.05;
+    sail.scale.x = belly;
+    stripe.scale.x = belly;
     llama.position.y = -3.4 + (celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0);
     liven(t, celebrating);
   };

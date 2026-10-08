@@ -6,7 +6,7 @@ const C = {
   grass: '#6cc04a', grassDark: '#4f9c37', sand: '#e8d38a', sandDark: '#cbb36a',
   rock: '#7d8791', rockLight: '#a9b2ba', rockDark: '#5b636b',
   log: '#8b5a2b', logLight: '#a7713a', logDark: '#5f3a17',
-  hull: '#a35f2a', hullDark: '#6e3d15', deck: '#c98a4b',
+  hull: '#a35f2a', hullDark: '#6e3d15', deck: '#c98a4b', sail: '#fdf6e8', sailShade: '#e4d8c2', mast: '#8a6136',
   llama: '#fbf6ee', pink: '#f2c9b0', scarf: '#e2453b',
   virus: '#e0479e', virusDark: '#9c2a68', virusCore: '#ffd3ec', spit: '#eaffd0',
 };
@@ -314,15 +314,6 @@ export function drawLlamaBoat(ctx, x, y, lean, t, flashing, celebrating = false)
   ctx.fillStyle = 'rgba(0,40,80,0.28)';
   ctx.beginPath(); ctx.ellipse(0, 4, 16, 26, 0, 0, Math.PI * 2); ctx.fill();
 
-  // oars
-  const sw = celebrating ? Math.sin(t * 14) : Math.sin(t * 7);
-  ctx.strokeStyle = C.logDark; ctx.lineWidth = 3; ctx.lineCap = 'round';
-  for (const s of [-1, 1]) {
-    const ex = s * (23 + sw * 3), ey = 8 - sw * 7;
-    ctx.beginPath(); ctx.moveTo(s * 11, 1); ctx.lineTo(ex, ey); ctx.stroke();
-    ctx.fillStyle = C.log; ctx.beginPath(); ctx.ellipse(ex + s * 2, ey + 1, 4, 7, s * 0.5, 0, Math.PI * 2); ctx.fill();
-  }
-
   // hull (bow points up = toward B)
   const hull = () => {
     ctx.beginPath();
@@ -338,6 +329,30 @@ export function drawLlamaBoat(ctx, x, y, lean, t, flashing, celebrating = false)
   ctx.save(); ctx.scale(0.72, 0.76); ctx.translate(0, 1); hull(); ctx.fillStyle = C.deck; ctx.fill(); ctx.restore();
   ctx.strokeStyle = 'rgba(90,50,20,0.45)'; ctx.lineWidth = 1.2;
   for (const yy of [-8, 0, 8, 15]) { ctx.beginPath(); ctx.moveTo(-8, yy); ctx.lineTo(8, yy); ctx.stroke(); }
+
+  // Sail, seen from above: a bellied crescent swung out to one side, matching
+  // the 3D rig so the two builds read the same.
+  const boom = 0.95 + Math.sin(t * 0.7) * 0.05 - lean * 0.3;
+  const BOOM_LEN = 32;
+  const mx = 0, my = -7;
+  const bx = mx + Math.sin(boom) * BOOM_LEN, by = my + Math.cos(boom) * BOOM_LEN;
+  const dx = bx - mx, dy = by - my, dl = Math.hypot(dx, dy) || 1;
+  const px = dy / dl, py = -dx / dl;              // perpendicular, leeward side
+  const belly = 14 + Math.sin(t * 1.6) * 1.4;
+  const cx1 = mx + dx * 0.5 + px * belly, cy1 = my + dy * 0.5 + py * belly;
+  const cx2 = mx + dx * 0.5 + px * belly * 0.4, cy2 = my + dy * 0.5 + py * belly * 0.4;
+  ctx.fillStyle = C.sail;
+  ctx.beginPath();
+  ctx.moveTo(mx, my);
+  ctx.quadraticCurveTo(cx1, cy1, bx, by);
+  ctx.quadraticCurveTo(cx2, cy2, mx, my);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = C.sailShade; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.strokeStyle = C.mast; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(bx, by); ctx.stroke();
+  ctx.fillStyle = C.mast;
+  ctx.beginPath(); ctx.arc(mx, my, 3.2, 0, Math.PI * 2); ctx.fill();
 
   // llama (drawn slightly larger than the deck so it reads at phone size)
   const hop = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
