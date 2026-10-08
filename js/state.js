@@ -1,17 +1,19 @@
 // Screen state machine + DOM wiring. Owns the current Session while playing.
+// Renderer-agnostic: it is handed a renderer exposing renderSession(session, t)
+// and renderBackdrop(t), so the same screens drive the 2D canvas or the 3D scene.
 import { LEVELS } from './levels.js';
 import { Session } from './game.js';
-import { renderSession, renderBackdrop } from './render.js';
 import { loadProgress, saveProgress } from './storage.js';
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = ['title', 'levels', 'paused', 'complete', 'gameover'];
 
 export class App {
-  constructor(view, sfx, input) {
+  constructor(view, sfx, input, renderer) {
     this.view = view;
     this.sfx = sfx;
     this.input = input;
+    this.renderer = renderer;
     this.progress = loadProgress();
     this.sfx.setMuted(this.progress.muted);
     this.state = 'title';
@@ -169,8 +171,8 @@ export class App {
     else if (s.status === 'lost' && s.endTimer > 1.0) this.finishLost();
   }
 
-  render(ctx, t) {
-    if (this.session) renderSession(ctx, this.session, this.view, t);
-    else renderBackdrop(ctx, this.view, t);
+  render(t) {
+    if (this.session) this.renderer.renderSession(this.session, t);
+    else this.renderer.renderBackdrop(t);
   }
 }

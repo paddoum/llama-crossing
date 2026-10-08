@@ -3,6 +3,7 @@ import { LOGICAL_W } from './levels.js';
 import { Sfx } from './audio.js';
 import { Input } from './input.js';
 import { App } from './state.js';
+import { renderSession, renderBackdrop } from './render.js';
 import { VERSION } from './version.js';
 
 document.getElementById('version').textContent = 'v' + VERSION;
@@ -39,7 +40,24 @@ const input = new Input(canvas, {
   onDragMove: (dx) => app.onDragMove(dx),
   onKey: (k) => app.onKey(k),
 });
-const app = new App(view, sfx, input);
+// Adapter: owns the letterboxed canvas transform, hands plain draw calls to render.js.
+function withStage(draw) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#0f2436';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.setTransform(view.scale, 0, 0, view.scale, view.offsetX * view.dpr, 0);
+  ctx.beginPath(); ctx.rect(0, 0, view.W, view.H); ctx.clip();
+  draw();
+  ctx.restore();
+}
+
+const renderer = {
+  renderSession: (session, t) => withStage(() => renderSession(ctx, session, view, t)),
+  renderBackdrop: (t) => withStage(() => renderBackdrop(ctx, view, t)),
+};
+
+const app = new App(view, sfx, input, renderer);
 window.__app = app; // handy for debugging in devtools
 
 window.addEventListener('resize', resize);
@@ -71,14 +89,6 @@ function frame(now) {
   }
   if (steps === 5) acc = 0;
 
-  // Letterbox
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#0f2436';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.setTransform(view.scale, 0, 0, view.scale, view.offsetX * view.dpr, 0);
-  ctx.beginPath(); ctx.rect(0, 0, view.W, view.H); ctx.clip();
-  app.render(ctx, elapsed);
-  ctx.restore();
+  app.render(elapsed);
 }
 requestAnimationFrame(frame);

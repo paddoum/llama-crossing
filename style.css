@@ -198,3 +198,65 @@ p { margin: 0; font-size: 17px; }
   animation: toast-in .3s ease-out;
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---- shared extras: mode tag, cross-links, 3D overlays ---- */
+.mode-tag {
+  margin: -4px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  opacity: .7;
+}
+a.btn { text-decoration: none; display: flex; align-items: center; justify-content: center; }
+
+/* Hit flash / whirlpool pull tint (the 3D build has no canvas HUD layer) */
+#fx {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 35%, var(--fx-color, rgba(220,30,30,.85)) 100%);
+}
+
+/* A → B progress rail */
+#progress {
+  position: fixed;
+  right: calc(8px + var(--safe-right));
+  top: 76px;
+  bottom: calc(26px + var(--safe-bottom));
+  width: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  font-size: 10px;
+  font-weight: 900;
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+#progress-track {
+  position: relative;
+  flex: 1;
+  width: 8px;
+  border-radius: 999px;
+  background: rgba(10, 30, 50, 0.45);
+  overflow: visible;
+}
+#progress-fill {
+  position: absolute;
+  left: 2px; right: 2px; bottom: 0;
+  height: 0%;
+  border-radius: 999px;
+  background: #ffd75e;
+}
+#progress-dot {
+  position: absolute;
+  left: 50%;
+  bottom: 0%;
+  width: 10px; height: 10px;
+  margin-left: -5px; margin-bottom: -5px;
+  border-radius: 50%;
+  background: var(--cream);
+  border: 1.5px solid #6e3d15;
+}
