@@ -1,18 +1,18 @@
 // Level definitions + deterministic generator.
 // World units: the river is drawn in a 360-unit-wide logical column; y grows toward the far dock (B).
-import { makeRock, makeLog, makeWhirlpool, makeCarrot } from './entities.js';
+import { makeRock, makeLog, makeWhirlpool, makeVirus } from './entities.js';
 
 export const LOGICAL_W = 360;
 export const START_Y = 80;       // boat spawn
 export const MIN_GAP = 58;       // guaranteed passable gap per obstacle row
 
 export const LEVELS = [
-  { name: 'Calm Creek',        length: 2400, speed: 110, riverWidth: 260, meanderAmp: 0,  meanderLen: 900,  gap: [170, 240], weights: { rock: 1, log: 0, whirlpool: 0 }, maxPerRow: 1, carrotChance: 0.7, seed: 11 },
-  { name: 'Log Jam',           length: 3000, speed: 125, riverWidth: 250, meanderAmp: 18, meanderLen: 1000, gap: [150, 220], weights: { rock: 2, log: 2, whirlpool: 0 }, maxPerRow: 2, carrotChance: 0.65, seed: 22 },
-  { name: 'Spinning Shallows', length: 3400, speed: 135, riverWidth: 240, meanderAmp: 30, meanderLen: 900,  gap: [140, 210], weights: { rock: 2, log: 1, whirlpool: 2 }, maxPerRow: 2, carrotChance: 0.6, seed: 33 },
-  { name: 'The Narrows',       length: 3800, speed: 145, riverWidth: 200, meanderAmp: 40, meanderLen: 800,  gap: [130, 200], weights: { rock: 3, log: 2, whirlpool: 1 }, maxPerRow: 2, carrotChance: 0.6, seed: 44 },
-  { name: 'Rapids',            length: 4400, speed: 165, riverWidth: 225, meanderAmp: 50, meanderLen: 750,  gap: [120, 185], weights: { rock: 3, log: 3, whirlpool: 2 }, maxPerRow: 3, carrotChance: 0.55, seed: 55 },
-  { name: 'Final Crossing',    length: 5200, speed: 185, riverWidth: 205, meanderAmp: 60, meanderLen: 700,  gap: [110, 170], weights: { rock: 3, log: 3, whirlpool: 3 }, maxPerRow: 3, carrotChance: 0.5, seed: 66 },
+  { name: 'Calm Creek',        length: 2400, speed: 110, riverWidth: 260, meanderAmp: 0,  meanderLen: 900,  gap: [170, 240], weights: { rock: 1, log: 0, whirlpool: 0 }, maxPerRow: 1, virusChance: 0.7, seed: 11 },
+  { name: 'Log Jam',           length: 3000, speed: 125, riverWidth: 250, meanderAmp: 18, meanderLen: 1000, gap: [150, 220], weights: { rock: 2, log: 2, whirlpool: 0 }, maxPerRow: 2, virusChance: 0.65, seed: 22 },
+  { name: 'Spinning Shallows', length: 3400, speed: 135, riverWidth: 240, meanderAmp: 30, meanderLen: 900,  gap: [140, 210], weights: { rock: 2, log: 1, whirlpool: 2 }, maxPerRow: 2, virusChance: 0.6, seed: 33 },
+  { name: 'The Narrows',       length: 3800, speed: 145, riverWidth: 200, meanderAmp: 40, meanderLen: 800,  gap: [130, 200], weights: { rock: 3, log: 2, whirlpool: 1 }, maxPerRow: 2, virusChance: 0.6, seed: 44 },
+  { name: 'Rapids',            length: 4400, speed: 165, riverWidth: 225, meanderAmp: 50, meanderLen: 750,  gap: [120, 185], weights: { rock: 3, log: 3, whirlpool: 2 }, maxPerRow: 3, virusChance: 0.55, seed: 55 },
+  { name: 'Final Crossing',    length: 5200, speed: 185, riverWidth: 205, meanderAmp: 60, meanderLen: 700,  gap: [110, 170], weights: { rock: 3, log: 3, whirlpool: 3 }, maxPerRow: 3, virusChance: 0.5, seed: 66 },
 ];
 
 // mulberry32 — small, fast, deterministic.
@@ -56,7 +56,7 @@ const FACTORY = { rock: makeRock, log: makeLog, whirlpool: makeWhirlpool };
 export function generateLevel(level) {
   const rng = makeRng(level.seed);
   const obstacles = [];
-  const carrots = [];
+  const viruses = [];
   const types = weightedList(level.weights);
   const startGap = 380;
   const endGap = 320;
@@ -73,14 +73,14 @@ export function generateLevel(level) {
     ensurePassable(row, b.left, b.right);
     obstacles.push(...row);
 
-    if (rng.chance(level.carrotChance)) {
-      const cy = y + rng.range(55, 105);
-      const cb = riverBounds(level, cy);
-      carrots.push(makeCarrot(rng.range(cb.left + 22, cb.right - 22), cy));
+    if (rng.chance(level.virusChance)) {
+      const vy = y + rng.range(55, 105);
+      const vb = riverBounds(level, vy);
+      viruses.push(makeVirus(rng, rng.range(vb.left + 30, vb.right - 30), vy));
     }
     y += rng.range(level.gap[0], level.gap[1]);
   }
-  return { obstacles, carrots };
+  return { obstacles, viruses };
 }
 
 // Removes overlapping obstacles and guarantees at least one MIN_GAP-wide opening in the row.

@@ -38,6 +38,7 @@ const input = new Input(canvas, {
   onFirstInteract: () => sfx.unlock(),
   onDragStart: () => app.onDragStart(),
   onDragMove: (dx) => app.onDragMove(dx),
+  onTap: () => app.onTap(),
   onKey: (k) => app.onKey(k),
 });
 // Adapter: owns the letterboxed canvas transform, hands plain draw calls to render.js.

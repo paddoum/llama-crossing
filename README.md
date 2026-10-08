@@ -1,21 +1,38 @@
 # Llama Crossing
 
-A mobile-first web game: a llama rows a boat from shore **A** to dock **B**, dodging rocks, drifting logs and whirlpools while grabbing carrots. Vanilla HTML/Canvas, no build step, no dependencies, no image assets (everything is drawn in code).
+A mobile-first web game: a llama rows a boat from shore **A** to dock **B**, dodging rocks, drifting logs and whirlpools, and spitting at the viruses floating in the river. No build step and no image assets -- everything is drawn in code.
+
+Two builds share one simulation:
+
+| | | |
+|---|---|---|
+| **3D** (default) | `/` | Three.js chase cam, low-poly geometry built in code |
+| **2D classic** | `/2d/` | the original canvas renderer |
+
+Levels, physics, scoring and saved progress are identical; only the renderer differs.
 
 ## Play locally
 
 The game uses ES modules, so it needs a static server (any will do):
 
 ```bash
-python3 -m http.server 8000 --bind 0.0.0.0
+python3 devserver.py 8001
 ```
 
-Then open <http://localhost:8000>. To play on your phone, connect it to the same Wi‑Fi and open `http://<your-Mac-IP>:8000` (find the IP with `ipconfig getifaddr en0`).
+Then open <http://localhost:8001>. To play on your phone, connect it to the same Wi‑Fi and open `http://<your-Mac-IP>:8001` (find the IP with `ipconfig getifaddr en0`).
+
+`devserver.py` is an ordinary static server that sends `Cache-Control: no-store`. Use it rather than `python3 -m http.server`: ES modules are cached per URL, so a plain server will happily leave the page running a mix of edited and cached files, which looks exactly like a bug.
 
 ## Controls
 
-- **Phone:** drag anywhere on the screen to steer (relative drag — the boat moves by how far your finger travels).
-- **Desktop:** ← / → or A / D to steer, `P` / `Esc` to pause.
+- **Phone:** drag anywhere to steer (relative drag — the boat moves by how far your finger travels). **Tap** to spit.
+- **Desktop:** ← / → or A / D to steer, `Space` to spit, `P` / `Esc` to pause.
+
+A tap is a press under 260 ms that moved less than 12 px, so steering never fires a spit by accident.
+
+## Scoring
+
+Three hearts per crossing. Rocks, logs, whirlpool cores and virus contact each cost one. Stars: one for finishing, one more for ending with 2+ hearts, one more for zapping 70%+ of the level's viruses.
 
 ## Hosting
 
@@ -30,21 +47,35 @@ This matters because the game is served as plain ES modules with no build step: 
 ## Structure
 
 ```
-index.html            page shell, HUD and menu screens
-style.css             layout, buttons, safe-area handling
+index.html            3D page (importmap pulls Three.js from a CDN)
+2d/index.html         2D page; loads ../js/main2d.js
+style.css             shared layout, buttons, HUD, safe-area handling
+devserver.py          no-cache static server for development
 manifest.webmanifest  PWA manifest · icon.svg
-js/main.js            canvas sizing (DPR + portrait letterbox), fixed-step game loop
+
+js/main3d.js          3D bootstrap: WebGL sizing, fixed-step loop
+js/main2d.js          2D bootstrap: DPR canvas, portrait letterbox, same loop
+js/render3d.js        Three.js scene: water, banks, props, dock, llama boat, FX
+js/render.js          2D canvas drawing
+
+shared by both builds:
 js/state.js           screen state machine, DOM wiring, results & unlocks
-js/game.js            Session: one play-through (simulation, hits, scoring)
+js/game.js            Session: one play-through (simulation, spit, hits, scoring)
 js/levels.js          level data, seeded RNG, obstacle generator, river shape
-js/entities.js        boat / rock / log / whirlpool / carrot factories
+js/entities.js        boat / rock / log / whirlpool / virus / spit factories
 js/physics.js         collisions, bank clamping, whirlpool pull
-js/render.js          all drawing (water, banks, dock, llama boat, hazards, FX)
-js/input.js           pointer drag + keyboard
+js/input.js           pointer drag, tap detection, keyboard
 js/audio.js           WebAudio synth SFX (no audio files)
 js/storage.js         localStorage progress
+js/version.js         build label
 ```
+
+`state.js` is renderer-agnostic: it takes an object exposing `renderSession(session, t)` and `renderBackdrop(t)`, which is the whole seam between the two builds.
+
+## Tuning the 3D camera
+
+The constants at the top of `js/render3d.js` (`FOV`, `CAM_BACK`, `CAM_UP`, `LOOK_AHEAD`) set the framing. Portrait is a tall, narrow window, so the camera sits high and well back and looks down ~29°; a shallower angle spends most of the screen on sky. The camera tracks the boat laterally on purpose, so whatever is near your lane stays on screen even though the far bank does not.
 
 ## Tuning levels
 
-Edit the `LEVELS` array in `js/levels.js`. Each level is data: `length`, `speed`, `riverWidth`, meander (`meanderAmp`, `meanderLen`), obstacle row `gap`, type `weights`, `maxPerRow`, `carrotChance`, and a `seed`. Changing the seed gives a different but still deterministic layout; the generator always leaves at least one 58‑unit gap per row so every level is passable.
+Edit the `LEVELS` array in `js/levels.js`. Each level is data: `length`, `speed`, `riverWidth`, meander (`meanderAmp`, `meanderLen`), obstacle row `gap`, type `weights`, `maxPerRow`, `virusChance`, and a `seed`. Changing the seed gives a different but still deterministic layout; the generator always leaves at least one 58‑unit gap per row so every level is passable.

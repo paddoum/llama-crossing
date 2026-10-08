@@ -1,11 +1,14 @@
 // One play-through of a level: entities, simulation, scoring.
 import { LEVELS, START_Y, generateLevel, riverBounds } from './levels.js';
-import { makeBoat } from './entities.js';
+import { makeBoat, makeSpit } from './entities.js';
 import { updateLog, boatHits, applyWhirlpool, clampToBanks, dist } from './physics.js';
 
 const STEER_RATE = 11;     // how quickly boat.x follows targetX
 const KEY_SPEED = 300;     // units/s for keyboard steering
 const HIT_INVULN = 1.6;
+const SPIT_SPEED = 330;    // units/s up-river, on top of the boat's own speed
+const SPIT_COOLDOWN = 0.26;
+const SPIT_RANGE = 460;
 const DOCK_VIEW_PAD = 100;  // world units above the finish line kept on screen (pier + flag); the HUD may overlay it
 
 export class Session {
@@ -17,13 +20,15 @@ export class Session {
 
     const data = generateLevel(this.level);
     this.obstacles = data.obstacles;
-    this.carrots = data.carrots;
-    this.totalCarrots = this.carrots.length;
+    this.viruses = data.viruses;
+    this.totalViruses = this.viruses.length;
+    this.spits = [];
+    this.spitCd = 0;
 
     const start = riverBounds(this.level, START_Y);
     this.boat = makeBoat(start.center, START_Y);
     this.time = 0;
-    this.carrotsGot = 0;
+    this.zapped = 0;
     this.particles = [];
     this.shake = 0;
     this.flash = 0;
@@ -39,6 +44,17 @@ export class Session {
     this.boat.targetX += dx;
   }
 
+  // Llama spits up-river. Rate-limited, and ignored once the run is over.
+  spit() {
+    if (this.status !== 'playing' || this.spitCd > 0) return false;
+    this.spitCd = SPIT_COOLDOWN;
+    const b = this.boat;
+    this.spits.push(makeSpit(b.x, b.y + 26, SPIT_SPEED + this.level.speed * b.speedMul));
+    this.sfx.spit();
+    for (let i = 0; i < 4; i++) this.spawnParticle(b.x, b.y + 26, 50, 0.25, 'rgba(230,255,210,0.95)');
+    return true;
+  }
+
   // --- simulation ---
   update(dt, axis) {
     const { boat, level } = this;
@@ -52,6 +68,7 @@ export class Session {
     }
 
     if (axis) boat.targetX += axis * KEY_SPEED * dt;
+    if (this.spitCd > 0) this.spitCd -= dt;
 
     // Forward motion
     const speed = level.speed * boat.speedMul;
@@ -88,15 +105,34 @@ export class Session {
       if (boat.invuln <= 0 && boatHits(boat, o)) this.takeHit(o);
     }
 
-    // Carrots
-    for (const c of this.carrots) {
-      if (c.taken || Math.abs(c.y - boat.y) > 60) continue;
-      if (dist(boat.x, boat.y, c.x, c.y) < boat.r + c.r + 2) {
-        c.taken = true;
-        this.carrotsGot++;
-        this.sfx.pickup();
-        for (let i = 0; i < 8; i++) this.spawnParticle(c.x, c.y, 80, 0.5, '#ffb347');
+    // Viruses wobble in place; touching one costs a heart and bursts it.
+    for (const v of this.viruses) {
+      if (v.dead || Math.abs(v.y - boat.y) > 620) continue;
+      v.x = v.bx + Math.sin(this.time * 1.2 + v.phase) * v.amp;
+      v.spin += dt * 2.2;
+      if (boat.invuln <= 0 && dist(boat.x, boat.y, v.x, v.y) < boat.r + v.r - 3) {
+        this.burst(v, false);
+        this.takeHit(v);
       }
+    }
+
+    // Spit flies up-river until it hits a virus, runs out or leaves the banks.
+    for (let i = this.spits.length - 1; i >= 0; i--) {
+      const s = this.spits[i];
+      s.y += s.vy * dt;
+      s.life -= dt;
+      if (s.life <= 0 || s.y - boat.y > SPIT_RANGE) { this.spits.splice(i, 1); continue; }
+      if (Math.random() < 0.4) this.spawnParticle(s.x, s.y - 6, 18, 0.2, 'rgba(235,255,215,0.9)');
+      let hit = false;
+      for (const v of this.viruses) {
+        if (v.dead || Math.abs(v.y - s.y) > 40) continue;
+        if (dist(s.x, s.y, v.x, v.y) < s.r + v.r) {
+          this.burst(v, true);
+          hit = true;
+          break;
+        }
+      }
+      if (hit) this.spits.splice(i, 1);
     }
 
     // Wake
@@ -121,6 +157,15 @@ export class Session {
     const follow = boatY - this.view.H * 0.3;
     const pierTop = this.level.length + DOCK_VIEW_PAD - this.view.H;
     return Math.min(follow, pierTop);
+  }
+
+  burst(v, bySpit) {
+    v.dead = true;
+    if (bySpit) {
+      this.zapped++;
+      this.sfx.pop();
+    }
+    for (let i = 0; i < 12; i++) this.spawnParticle(v.x, v.y, 95, 0.55, bySpit ? '#8ef06a' : '#e0479e');
   }
 
   takeHit(o) {
@@ -165,11 +210,11 @@ export class Session {
     this.flash = Math.max(0, this.flash - 1.8 * dt);
   }
 
-  // 1 star for finishing, +1 for 2+ hearts, +1 for 70%+ carrots
+  // 1 star for finishing, +1 for 2+ hearts, +1 for zapping 70%+ of the viruses
   stars() {
     let s = 1;
     if (this.boat.hearts >= 2) s++;
-    if (this.totalCarrots === 0 || this.carrotsGot / this.totalCarrots >= 0.7) s++;
+    if (this.totalViruses === 0 || this.zapped / this.totalViruses >= 0.7) s++;
     return s;
   }
 

@@ -65,9 +65,13 @@ export class Sfx {
   }
 
   // --- game sounds ---
-  pickup() {
-    this.tone(880, 0.08, { type: 'square', gain: 0.10 });
-    this.tone(1320, 0.14, { type: 'square', gain: 0.10, delay: 0.07 });
+  spit() {
+    this.noise(0.09, 0.22, 2600);
+    this.tone(520, 0.07, { type: 'sawtooth', gain: 0.06, slide: 240 });
+  }
+  pop() {
+    this.tone(760, 0.07, { type: 'square', gain: 0.10, slide: 420 });
+    this.noise(0.12, 0.18, 1800, 0.03);
   }
   hit() {
     this.noise(0.28, 0.5, 700);

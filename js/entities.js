@@ -35,6 +35,19 @@ export function makeWhirlpool(rng, left, right, y) {
   return { type: 'whirlpool', x: rng.range(left + 30, right - 30), y, r, R, ext: 22, spin: rng.next() * 6 };
 }
 
-export function makeCarrot(x, y) {
-  return { type: 'carrot', x, y, r: 11, taken: false };
+// Viruses drift in place and hurt on contact; spit kills them.
+export function makeVirus(rng, x, y) {
+  return {
+    type: 'virus',
+    x, bx: x, y,
+    r: 13,
+    amp: rng.range(6, 20),
+    phase: rng.next() * 6.283,
+    spin: rng.next() * 6.283,
+    dead: false,
+  };
+}
+
+export function makeSpit(x, y, vy) {
+  return { x, y, vy, r: 6.5, life: 1.5, maxLife: 1.5 };
 }

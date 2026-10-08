@@ -11,7 +11,8 @@ const COL = {
   rock: 0x7d8791, log: 0x8b5a2b, logLight: 0xa7713a, logDark: 0x5f3a17,
   hull: 0xa35f2a, hullDark: 0x6e3d15, deck: 0xc98a4b,
   llama: 0xfbf6ee, pink: 0xf2c9b0, scarf: 0xe2453b, ink: 0x241a12,
-  carrot: 0xf28c28, leaf: 0x4fae3f, swirl: 0x0d2b52, white: 0xffffff, dark: 0x1a1a1a,
+  virus: 0xe0479e, virusDark: 0x9c2a68, virusCore: 0xffd3ec, spit: 0xeaffd0,
+  swirl: 0x0d2b52, white: 0xffffff, dark: 0x1a1a1a,
   waterFar: 0x2f86c6,
 };
 
@@ -32,8 +33,10 @@ const M = {
   pink: mat(COL.pink),
   scarf: mat(COL.scarf),
   ink: mat(COL.ink),
-  carrot: mat(COL.carrot),
-  leaf: mat(COL.leaf),
+  virus: mat(COL.virus),
+  virusDark: mat(COL.virusDark),
+  virusCore: mat(COL.virusCore),
+  spit: mat(COL.spit),
   swirl: mat(COL.swirl, { side: THREE.DoubleSide }),
   white: mat(COL.white, { side: THREE.DoubleSide }),
   dark: mat(COL.dark),
@@ -100,7 +103,8 @@ export class Renderer3D {
     this.session = null;
     this.logMeshes = [];
     this.swirlMeshes = [];
-    this.carrotMeshes = [];
+    this.virusMeshes = [];
+    this.spitPool = [];
     this.lastT = 0;
     this.camLook = new THREE.Vector3(0, 0, -LOOK_AHEAD);
 
@@ -177,6 +181,26 @@ export class Renderer3D {
     geo.setDrawRange(0, max);
   }
 
+  // Spit is pooled: a handful of blobs reused for the whole run.
+  updateSpits(session, t) {
+    const list = session.spits;
+    while (this.spitPool.length < list.length) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(6.5, 7, 5), M.spit);
+      m.visible = false;
+      this.scene.add(m);
+      this.spitPool.push(m);
+    }
+    this.spitPool.forEach((m, i) => {
+      const s = list[i];
+      m.visible = !!s;
+      if (!s) return;
+      const x = s.x - HALF, z = -s.y;
+      m.position.set(x, waveAt(x, z, t) + 16, z);
+      const k = 0.6 + 0.4 * (s.life / s.maxLife);
+      m.scale.set(k, k, k * 1.4);
+    });
+  }
+
   // --- level geometry ---------------------------------------------------
   buildLevel(session) {
     this.disposeLevel();
@@ -199,11 +223,12 @@ export class Renderer3D {
       g.add(mesh);
     }
 
-    this.carrotMeshes = [];
-    for (const c of session.carrots) {
-      const mesh = makeCarrot();
-      mesh.position.set(c.x - HALF, 6, -c.y);
-      this.carrotMeshes.push({ c, mesh });
+    this.virusMeshes = [];
+    const proto = makeVirus();
+    for (const v of session.viruses) {
+      const mesh = proto.clone();
+      mesh.position.set(v.x - HALF, 11, -v.y);
+      this.virusMeshes.push({ v, mesh });
       g.add(mesh);
     }
 
@@ -246,10 +271,14 @@ export class Renderer3D {
       mesh.rotation.y = -o.spin;
       mesh.children[0].rotation.y = o.spin * 1.7;
     }
-    for (const { c, mesh } of this.carrotMeshes) {
-      mesh.visible = !c.taken;
-      if (!c.taken) { mesh.rotation.y = t * 1.8; mesh.position.y = 7 + Math.sin(t * 3 + c.x) * 1.6; }
+    for (const { v, mesh } of this.virusMeshes) {
+      mesh.visible = !v.dead;
+      if (v.dead) continue;
+      mesh.position.x = v.x - HALF;
+      mesh.position.y = 11 + Math.sin(t * 2.4 + v.phase) * 2.2;
+      mesh.rotation.set(v.spin * 0.6, v.spin, v.spin * 0.3);
     }
+    this.updateSpits(session, t);
 
     this.updateParticles(session, t);
 
@@ -494,16 +523,32 @@ function makeWhirlpool(o) {
   return g;
 }
 
-function makeCarrot() {
+function makeVirus() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.ConeGeometry(5.5, 17, 7), M.carrot);
-  body.rotation.x = Math.PI;
-  g.add(body);
-  for (const a of [-0.5, 0, 0.5]) {
-    const leaf = new THREE.Mesh(new THREE.ConeGeometry(1.8, 7, 4), M.leaf);
-    leaf.position.set(Math.sin(a) * 2.4, 11, Math.cos(a) * 1.2);
-    leaf.rotation.z = a * 0.6;
-    g.add(leaf);
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(11, 0), M.virus);
+  g.add(core);
+  const spikeGeo = new THREE.ConeGeometry(2.4, 8, 4);
+  const knobGeo = new THREE.SphereGeometry(2.6, 5, 4);
+  // Spikes on the icosahedron's own vertex directions, so they sit on the hull.
+  const dirs = [];
+  const pos = core.geometry.attributes.position;
+  for (let i = 0; i < pos.count; i += 3) {
+    const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize();
+    if (!dirs.some((d) => d.dot(v) > 0.9)) dirs.push(v);
+  }
+  for (const d of dirs) {
+    const spike = new THREE.Mesh(spikeGeo, M.virusDark);
+    spike.position.copy(d).multiplyScalar(13);
+    spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    g.add(spike);
+    const knob = new THREE.Mesh(knobGeo, M.virusDark);
+    knob.position.copy(d).multiplyScalar(18);
+    g.add(knob);
+  }
+  for (const [a, b, c] of [[-4, -3, 8], [5, 4, 8], [0, 6, 8.5]]) {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(2.4, 5, 4), M.virusCore);
+    dot.position.set(a, b, c);
+    g.add(dot);
   }
   return g;
 }

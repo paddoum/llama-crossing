@@ -7,12 +7,18 @@ export class Input {
     this.keys = new Set();
     this.dragging = false;
     this.lastX = 0;
+    this.downAt = 0;
+    this.downX = 0;
+    this.travel = 0;
     this.pixelsPerUnit = 1; // set by main on resize
 
     canvas.addEventListener('pointerdown', (e) => {
       this.h.onFirstInteract?.();
       this.dragging = true;
       this.lastX = e.clientX;
+      this.downAt = performance.now();
+      this.downX = e.clientX;
+      this.travel = 0;
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       this.h.onDragStart?.();
       e.preventDefault();
@@ -20,10 +26,18 @@ export class Input {
     canvas.addEventListener('pointermove', (e) => {
       if (!this.dragging) return;
       const dx = (e.clientX - this.lastX) / this.pixelsPerUnit;
+      this.travel += Math.abs(e.clientX - this.lastX);
       this.lastX = e.clientX;
       this.h.onDragMove?.(dx * 1.25);
     });
-    const end = () => { this.dragging = false; };
+    // A quick press that barely moved is a tap, not a steer: that is the spit.
+    const end = (e) => {
+      if (this.dragging && e && e.type === 'pointerup' &&
+          performance.now() - this.downAt < 260 && this.travel < 12) {
+        this.h.onTap?.();
+      }
+      this.dragging = false;
+    };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
     canvas.addEventListener('lostpointercapture', end);

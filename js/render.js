@@ -8,7 +8,7 @@ const C = {
   log: '#8b5a2b', logLight: '#a7713a', logDark: '#5f3a17',
   hull: '#a35f2a', hullDark: '#6e3d15', deck: '#c98a4b',
   llama: '#fbf6ee', pink: '#f2c9b0', scarf: '#e2453b',
-  carrot: '#f28c28', carrotLeaf: '#4fae3f',
+  virus: '#e0479e', virusDark: '#9c2a68', virusCore: '#ffd3ec', spit: '#eaffd0',
 };
 
 const hash = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); };
@@ -27,12 +27,14 @@ export function renderSession(ctx, s, view, t) {
 
   // Whirlpools sit under everything else
   for (const o of s.obstacles) if (o.type === 'whirlpool' && inView(o.y, camY, H, 80)) drawWhirlpool(ctx, o.x, toY(o.y), o, t);
-  for (const c of s.carrots) if (!c.taken && inView(c.y, camY, H, 40)) drawCarrot(ctx, c.x, toY(c.y), t);
+  for (const v of s.viruses) if (!v.dead && inView(v.y, camY, H, 40)) drawVirus(ctx, v.x, toY(v.y), v);
   for (const o of s.obstacles) {
     if (!inView(o.y, camY, H, 80)) continue;
     if (o.type === 'rock') drawRock(ctx, o.x, toY(o.y), o, t);
     else if (o.type === 'log') drawLog(ctx, o.x, toY(o.y), o);
   }
+
+  for (const sp of s.spits) if (inView(sp.y, camY, H, 30)) drawSpit(ctx, sp.x, toY(sp.y), sp);
 
   // Particles
   for (const p of s.particles) {
@@ -264,17 +266,42 @@ function drawWhirlpool(ctx, x, y, o, t) {
   ctx.beginPath(); ctx.arc(x, y, o.r * 0.55, 0, Math.PI * 2); ctx.fill();
 }
 
-function drawCarrot(ctx, x, y, t) {
-  y += Math.sin(t * 3 + x) * 1.5;
-  ctx.save(); ctx.translate(x, y); ctx.rotate(0.35);
-  ctx.fillStyle = 'rgba(0,40,80,0.2)'; ctx.beginPath(); ctx.ellipse(1, 4, 8, 12, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = C.carrot;
-  ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, -6); ctx.lineTo(0, 14); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = 'rgba(160,80,10,0.5)'; ctx.lineWidth = 1.2;
-  for (const yy of [-1, 4]) { ctx.beginPath(); ctx.moveTo(-3, yy); ctx.lineTo(3, yy); ctx.stroke(); }
-  ctx.fillStyle = C.carrotLeaf;
-  for (const a of [-0.5, 0, 0.5]) { ctx.beginPath(); ctx.ellipse(Math.sin(a) * 4, -10, 2.2, 6, a, 0, Math.PI * 2); ctx.fill(); }
+function drawVirus(ctx, x, y, v) {
+  const r = v.r;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(v.spin);
+  // spikes
+  ctx.strokeStyle = C.virusDark;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const cx = Math.cos(a), sy = Math.sin(a);
+    ctx.beginPath();
+    ctx.moveTo(cx * r * 0.7, sy * r * 0.7);
+    ctx.lineTo(cx * (r + 6), sy * (r + 6));
+    ctx.stroke();
+    ctx.fillStyle = C.virusDark;
+    ctx.beginPath(); ctx.arc(cx * (r + 6), sy * (r + 6), 2.6, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = C.virus;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = C.virusDark; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = C.virusCore;
+  ctx.beginPath(); ctx.arc(-r * 0.25, -r * 0.25, r * 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(r * 0.3, r * 0.2, r * 0.17, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
+}
+
+function drawSpit(ctx, x, y, sp) {
+  const a = Math.max(0.2, sp.life / sp.maxLife);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = C.spit;
+  ctx.beginPath(); ctx.ellipse(x, y, sp.r * 0.8, sp.r * 1.25, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath(); ctx.arc(x - 1.5, y - 2, sp.r * 0.35, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
 }
 
 export function drawLlamaBoat(ctx, x, y, lean, t, flashing, celebrating = false) {

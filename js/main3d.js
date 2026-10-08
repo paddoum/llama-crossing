@@ -18,6 +18,7 @@ const input = new Input(canvas, {
   onFirstInteract: () => sfx.unlock(),
   onDragStart: () => app.onDragStart(),
   onDragMove: (dx) => app.onDragMove(dx),
+  onTap: () => app.onTap(),
   onKey: (k) => app.onKey(k),
 });
 const app = new App(view, sfx, input, renderer);

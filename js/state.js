@@ -20,7 +20,7 @@ export class App {
     this.session = null;
     this.levelIndex = 0;
     this.lastHearts = -1;
-    this.lastCarrots = -1;
+    this.lastZapped = -1;
     this.toastTimer = 0;
 
     this.bind();
@@ -48,12 +48,17 @@ export class App {
     });
   }
 
+  onTap() {
+    if (this.state === 'playing') this.session?.spit();
+  }
+
   onKey(key) {
     if (key === 'Escape' || key === 'p' || key === 'P') {
       if (this.state === 'playing') this.pause();
       else if (this.state === 'paused') this.resume();
     }
     if ((key === ' ' || key === 'Enter') && this.state === 'title') this.show('levels');
+    if (key === ' ' && this.state === 'playing') this.session?.spit();
   }
 
   onDragStart() {
@@ -91,11 +96,11 @@ export class App {
     this.levelIndex = i;
     this.session = new Session(i, this.view, this.sfx);
     this.lastHearts = -1;
-    this.lastCarrots = -1;
+    this.lastZapped = -1;
     this.sfx.unlock();
     this.sfx.startAmbient();
     this.show('playing');
-    this.toast(i === 0 ? 'Drag anywhere to steer' : `${i + 1}. ${LEVELS[i].name}`, 2.4);
+    this.toast(i === 0 ? 'Drag to steer · tap to spit' : `${i + 1}. ${LEVELS[i].name}`, 2.6);
   }
 
   pause() {
@@ -138,7 +143,7 @@ export class App {
     saveProgress(this.progress);
 
     $('complete-stars').innerHTML = '★'.repeat(stars) + `<span class="off">${'★'.repeat(3 - stars)}</span>`;
-    $('complete-info').textContent = `${s.level.name} · ${s.carrotsGot}/${s.totalCarrots} carrots · ${s.boat.hearts} ♥ left` + (isLast ? '\nYou crossed them all!' : '');
+    $('complete-info').textContent = `${s.level.name} · ${s.zapped}/${s.totalViruses} viruses zapped · ${s.boat.hearts} ♥ left` + (isLast ? '\nYou crossed them all!' : '');
     $('btn-next').classList.toggle('hidden', isLast);
     this.show('complete');
     this.sfx.stopAmbient();
@@ -162,9 +167,9 @@ export class App {
       this.lastHearts = s.boat.hearts;
       $('hearts').textContent = '♥'.repeat(Math.max(0, s.boat.hearts)) + '♡'.repeat(Math.max(0, 3 - s.boat.hearts));
     }
-    if (s.carrotsGot !== this.lastCarrots) {
-      this.lastCarrots = s.carrotsGot;
-      $('carrots').textContent = `🥕 ${s.carrotsGot}`;
+    if (s.zapped !== this.lastZapped) {
+      this.lastZapped = s.zapped;
+      $('zapped').textContent = `🦠 ${s.zapped}`;
     }
 
     if (s.status === 'won' && s.endTimer > 1.1) this.finishWon();
