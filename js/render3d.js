@@ -199,6 +199,12 @@ const LLAMA_URL = 'assets/llama.glb';
 // and finish under the waterline, where the opaque water hides them.
 const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 16.4;
 
+// The llama is one static mesh with no skeleton, so the forelegs are bent in
+// the vertex shader: vertices below the shoulder and forward of it rotate
+// about the shoulder, weighted so it bends rather than shearing off. They
+// also shorten, because the leg is twice as long as the reach to the oar.
+const ARM = { shoulderY: -0.18, shoulderZ: 0.08, falloff: 0.30, restY: -0.90, restZ: 0.09 };
+
 // Sculpted rowboat. Modelled Y-up with the bow at +X, so it gets a quarter
 // turn to point down-river. The oars are separate nodes, so they can row.
 const BOAT_URL = 'assets/rowboat.glb';
@@ -268,10 +274,41 @@ export class Renderer3D {
   loadLlama() {
     new GLTFLoader().load(LLAMA_URL, (gltf) => {
       const model = gltf.scene;
+      this.armUniforms = { uArm: { value: 0 }, uReach: { value: 1 } };
       model.traverse((o) => {
         if (!o.isMesh) return;
         // Lambert to match the rest of the scene's lighting, keeping the map.
         o.material = new THREE.MeshLambertMaterial({ map: o.material.map, side: THREE.DoubleSide });
+        o.material.onBeforeCompile = (shader) => {
+          shader.uniforms.uArm = this.armUniforms.uArm;
+          shader.uniforms.uReach = this.armUniforms.uReach;
+          shader.vertexShader = `
+            uniform float uArm;
+            uniform float uReach;
+            float armWeight(vec3 p) {
+              return smoothstep(${ARM.shoulderY.toFixed(3)}, ${(ARM.shoulderY - ARM.falloff).toFixed(3)}, p.y)
+                   * smoothstep(-0.02, 0.06, p.z);
+            }
+            vec3 armBend(vec3 p, float w) {
+              vec3 pivot = vec3(p.x, ${ARM.shoulderY.toFixed(3)}, ${ARM.shoulderZ.toFixed(3)});
+              vec3 rel = p - pivot;
+              float a = uArm * w;
+              float c = cos(a), s = sin(a);
+              vec3 rot = vec3(rel.x, rel.y * c - rel.z * s, rel.y * s + rel.z * c);
+              return pivot + rot * (1.0 - (1.0 - uReach) * w);
+            }
+            vec3 armRotate(vec3 v, float w) {
+              float a = uArm * w;
+              float c = cos(a), s = sin(a);
+              return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
+            }
+          ` + shader.vertexShader;
+          shader.vertexShader = shader.vertexShader
+            .replace('#include <beginnormal_vertex>',
+              '#include <beginnormal_vertex>\n  objectNormal = armRotate(objectNormal, armWeight(position));')
+            .replace('#include <begin_vertex>',
+              '#include <begin_vertex>\n  transformed = armBend(transformed, armWeight(position));');
+        };
         o.frustumCulled = false;
       });
       model.rotation.y = Math.PI;                 // modelled facing +Z, bow is -Z
@@ -318,8 +355,14 @@ export class Renderer3D {
         model.add(pivot);
         model.updateMatrixWorld(true);
         pivot.attach(oar);             // keeps the world transform
-        oars.push({ pivot, side });
+        oars.push({ pivot, side, oar });
       }
+
+      // The handles the llama holds. The model poses its two oars at slightly
+      // different pitches, so the arms aim at the midpoint between them and
+      // split the difference rather than gripping one and missing the other.
+      model.updateMatrixWorld(true);
+      const held = oars.map(({ oar }) => oarTip(oar)).filter(Boolean);
       if (oars.length !== 2) console.warn(`Expected 2 oars, rigged ${oars.length}.`);
 
       model.scale.setScalar(BOAT_SCALE);
@@ -337,9 +380,12 @@ export class Renderer3D {
         const rate = celebrating ? 9 : 4.4;
         const sweep = Math.sin(t * rate), dip = Math.cos(t * rate);
         for (const { pivot, side } of oars) {
-          pivot.rotation.y = sweep * 0.52;        // both oars pull together
-          pivot.rotation.x = dip * 0.30 * side;   // blades lift on the recovery
+          // The oarlocks are on opposite sides, so the yaw has to mirror for
+          // the blades to sweep together instead of scissoring.
+          pivot.rotation.y = sweep * 0.52 * side;
+          pivot.rotation.x = dip * 0.30;          // blades lift on the recovery
         }
+        if (held.length) this.reachForOar(held);
         model.rotation.z = -lean * 0.12;
         boat.userData.crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
         boat.userData.liven(t, celebrating);
@@ -348,6 +394,25 @@ export class Renderer3D {
     }, undefined, (err) => {
       console.warn('Boat model failed to load; keeping the built-in one.', err);
     });
+  }
+
+  // Points the llama's forelegs at the oar handle. The model has no skeleton,
+  // so the shader bends the legs about the shoulder: this works out the angle
+  // and how far to shorten them, which is all that bend takes.
+  reachForOar(held) {
+    const llama = this.boat.userData.crew.children[0];
+    if (!this.armUniforms || !llama) return;
+    this.boat.updateMatrixWorld(true);
+    const p = new THREE.Vector3();
+    for (const h of held) p.add(h.obj.localToWorld(h.local.clone()));
+    p.multiplyScalar(1 / held.length);
+    llama.worldToLocal(p);
+    const relY = p.y - ARM.shoulderY, relZ = p.z - ARM.shoulderZ;
+    const restY = ARM.restY - ARM.shoulderY, restZ = ARM.restZ - ARM.shoulderZ;
+    const angle = Math.atan2(relZ, relY) - Math.atan2(restZ, restY);
+    const reach = Math.hypot(relY, relZ) / Math.hypot(restY, restZ);
+    this.armUniforms.uArm.value = angle;
+    this.armUniforms.uReach.value = Math.max(0.25, Math.min(1, reach));
   }
 
   resize(w, h, dpr) {
@@ -862,6 +927,21 @@ function buildViruses(count) {
   ];
   for (const m of meshes) { m.frustumCulled = false; m.count = count; }
   return meshes;
+}
+
+// The inboard end of an oar -- the handle -- in that oar's own space.
+function oarTip(oar) {
+  let obj = null, best = null;
+  oar.traverse((o) => {
+    if (!o.isMesh) return;
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const p = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+      o.localToWorld(p);
+      if (!best || Math.abs(p.x) < Math.abs(best.x)) { best = p.clone(); obj = o; }
+    }
+  });
+  return obj ? { obj, local: obj.worldToLocal(best.clone()) } : null;
 }
 
 // Welds many small parts into one geometry. The llama is built from ~150 wool

@@ -78,6 +78,14 @@ js/version.js         build label
 
 It needed no conversion: 928 triangles, 152 KB, and the hull and both oars are separate nodes. It is modelled Y-up with the bow at **+X**, so it gets a quarter turn to point down-river.
 
+### Working the oars
+
+The llama model has no skeleton, so its forelegs are bent in the **vertex shader**: vertices below the shoulder and forward of it rotate about the shoulder, weighted by `smoothstep` so the leg bends instead of shearing off at a seam, and shortened at the same time — the leg is about twice as long as the reach to the oar. Normals are rotated by the same amount, or the raised legs would stay lit as though still hanging.
+
+The angle isn't animated by hand: each frame `reachForOar()` takes the oar handles' current position, converts it into the llama's local space and solves the rotation and shortening that put the hooves there. So the arms follow the stroke exactly rather than being a sine wave tuned to match it.
+
+Two quirks of the model are worth knowing. Its oarlocks are on opposite sides, so the oar yaw has to **mirror per side** (`* side`) or the blades scissor instead of pulling together. And its two oars are posed at slightly different pitches, which no single symmetric arm pose can hold — the arms aim at the midpoint between the handles and split the difference (mean gap ~2.4 units on a 60-unit boat). Trying to level the oars instead turns one of them upside down: the mirrored node transform inverts the angle relationship.
+
 The llama is seated by dropping it until the gunwale crosses *above* its legs — the body sits at the rim and the legs carry on down through the hull to finish below the waterline, where the opaque water hides them. `LLAMA_MODEL_Y` and `BOAT_Y` move together: raise one without the other and the llama either sinks out of sight or stands on top of the boat.
 
 The boat takes its height from the wave sampled at **both ends of the hull** (`HULL_HALF`), not just under its middle. With a hull this long against these wavelengths, a single centre sample lets the bow and stern dip under the surface and the boat visibly ships water.
