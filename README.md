@@ -72,6 +72,16 @@ js/version.js         build label
 
 `state.js` is renderer-agnostic: it takes an object exposing `renderSession(session, t)` and `renderBackdrop(t)`, which is the whole seam between the two builds.
 
+## The llama model
+
+`assets/llama.glb` is a sculpted llama (single mesh, 31k triangles, one baked colour texture). It is fetched in the background: the code-built llama sails the boat until the model arrives, so a slow connection -- or a missing file -- never blocks the game. `js/render3d.js` swaps it into the boat's `crew` group on load.
+
+The supplied file was 4.9 MB, 2.9 MB of which was a 2048x2048 JPEG for a llama about 150 px tall on screen. The texture is repacked at 1024 and the file is **2.26 MB**, now dominated by geometry rather than the image. If it needs to be smaller, the mesh is the thing to decimate.
+
+Two things to know when swapping in a different model: it is modelled standing and facing **+Z**, so it is given a half turn to face the bow (−Z), and its legs drop through the hull and end below the waterline, where the opaque water hides them. `LLAMA_MODEL_SCALE` and `LLAMA_MODEL_Y` seat it.
+
+The 2D build still draws its llama in code -- a GLB has nothing to render on a 2D canvas.
+
 ## Water
 
 The surface is a custom `ShaderMaterial` in `js/render3d.js`. Four directional sine waves are summed in the vertex shader and the normal comes from their analytic gradient, so there is no CPU work per frame and no vertex buffer upload. The waves are anchored to world space, so the sheet can follow the camera without the surface swimming, and its amplitude tapers at the rim to meet the flat far-field plane invisibly.

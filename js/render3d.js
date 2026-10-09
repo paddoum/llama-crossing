@@ -1,6 +1,7 @@
 // 3D renderer: identical simulation, Three.js scene.
 // World -> scene: X = x - 180 (across the river), Y = up, Z = -y (downriver is +Z).
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { LOGICAL_W, riverBounds } from './levels.js';
 
 const HALF = LOGICAL_W / 2;
@@ -193,6 +194,12 @@ const FOV = 68, CAM_BACK = 150, CAM_UP = 170, LOOK_AHEAD = 150, LOOK_UP = 4;
 // distance is derived from that strip rather than fixed.
 const MENU_BOAT_H = 74, MENU_BOAT_MID = 29;
 
+// Sculpted llama. It is modelled standing and facing +Z, so it gets a half
+// turn to face the bow; the legs drop through the hull and finish below the
+// waterline, where the opaque water hides them.
+const LLAMA_URL = 'assets/llama.glb';
+const LLAMA_MODEL_SCALE = 35, LLAMA_MODEL_Y = 10.5;
+
 export class Renderer3D {
   constructor(canvas) {
     // preserveDrawingBuffer keeps the last frame readable by gl.readPixels after
@@ -238,10 +245,40 @@ export class Renderer3D {
     this.menuLook = new THREE.Vector3(0, 12, -120);
     this.menuTip = new THREE.Vector3();
 
+    this.loadLlama();
+
     this.fx = document.getElementById('fx');
     this.progress = document.getElementById('progress');
     this.progressFill = document.getElementById('progress-fill');
     this.progressDot = document.getElementById('progress-dot');
+  }
+
+  // Loaded in the background: the built-in llama sails until this arrives, so
+  // a slow connection or a missing file never blocks the game.
+  loadLlama() {
+    new GLTFLoader().load(LLAMA_URL, (gltf) => {
+      const model = gltf.scene;
+      model.traverse((o) => {
+        if (!o.isMesh) return;
+        // Lambert to match the rest of the scene's lighting, keeping the map.
+        o.material = new THREE.MeshLambertMaterial({ map: o.material.map, side: THREE.DoubleSide });
+        o.frustumCulled = false;
+      });
+      model.rotation.y = Math.PI;                 // modelled facing +Z, bow is -Z
+      model.scale.setScalar(LLAMA_MODEL_SCALE);
+      model.position.y = LLAMA_MODEL_Y;
+      const crew = this.boat.userData.crew;
+      crew.clear();
+      crew.add(model);
+      // No rig in the model, so it just leans with the swell.
+      this.boat.userData.liven = (t, celebrating) => {
+        model.rotation.z = Math.sin(t * 0.9) * 0.03 + (celebrating ? Math.sin(t * 9) * 0.05 : 0);
+        model.rotation.y = Math.PI + Math.sin(t * 0.45) * 0.07;
+      };
+      this.llamaModel = model;
+    }, undefined, (err) => {
+      console.warn('Llama model failed to load; keeping the built-in one.', err);
+    });
   }
 
   resize(w, h, dpr) {
@@ -985,13 +1022,18 @@ function makeLlamaBoat() {
   const stripe = new THREE.Mesh(makeSailGeometry(BOOM_LEN, MAST_H - 4, 6, 0.4, 0.54, 1.04), M.sailStripe);
   rig.add(stripe);
 
-  // Llama, seated: scaled to river units and yawed so it faces the bow (-Z).
-  const LLAMA_SCALE = 9.5;
+  // Whoever is sailing sits in this group, so the sculpted model can replace
+  // the built-in llama once it has downloaded without disturbing the boat.
+  const crew = new THREE.Group();
+  crew.position.set(0, 0, 3);
+  g.add(crew);
   const { group: llama, animate: liven } = makeLlama();
-  llama.scale.setScalar(LLAMA_SCALE);
+  llama.scale.setScalar(9.5);
   llama.rotation.y = Math.PI / 2;
-  llama.position.set(0, -3.4, 3);
-  g.add(llama);
+  llama.position.y = -3.4;
+  crew.add(llama);
+  g.userData.crew = crew;
+  g.userData.liven = liven;
 
   // Sheet the boom with the turn and let the sail breathe.
   g.userData.rig = (t, celebrating, lean = 0) => {
@@ -1000,8 +1042,8 @@ function makeLlamaBoat() {
     const belly = 1 + Math.sin(t * 1.6) * 0.05;
     sail.scale.x = belly;
     stripe.scale.x = belly;
-    llama.position.y = -3.4 + (celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0);
-    liven(t, celebrating);
+    crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
+    g.userData.liven(t, celebrating);
   };
   return g;
 }
