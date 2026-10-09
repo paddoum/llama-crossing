@@ -74,17 +74,21 @@ js/version.js         build label
 
 ## The boat model
 
-`assets/boat.glb` comes from a printable STL via `tools/stl_to_glb.py`, which is kept so the conversion is reproducible:
+`assets/rowboat.glb` — **"Stylized Low Poly Rowboat with Paddles" by [Muyaya Concept](https://sketchfab.com/3d-models/stylized-low-poly-rowboat-with-paddles-f2c35c716f32474e96cce3625073e6b8), licensed [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).** CC BY requires attribution wherever the work is used, so the credit is shown on the title screen as well as here — don't remove it.
+
+It needed no conversion: 928 triangles, 152 KB, and the hull and both oars are separate nodes. It is modelled Y-up with the bow at **+X**, so it gets a quarter turn to point down-river.
+
+Each oar hangs off a pivot at its oarlock (`OARLOCK`) so it can row — `Object3D.attach()` moves it there while preserving its world transform, which keeps the pivots aligned with the boat's own axes rather than the exporter's nested ones. Note that **GLTFLoader sanitises node names** (`paddle.001` becomes `paddle001`), so the oars are matched on a name prefix and each one's side is taken from where it actually sits.
+
+### Importing an STL instead
+
+`tools/stl_to_glb.py` converts a printable STL into a web-ready GLB — it drops a base plate, splits the mesh so parts can take separate colours (STL carries no materials), decimates by vertex clustering, and reorients to the game's axes:
 
 ```bash
-python3 tools/stl_to_glb.py Bateau_V6.stl assets/boat.glb
+python3 tools/stl_to_glb.py boat.stl assets/boat.glb
 ```
 
-The source was **15.6 MB / 327,648 triangles** — a 3D-printing model at sub-millimetre density, Z-up, bow at +Y, with a flat base plate under the hull. The script drops the plate, splits the mesh into **hull / spars / sails** (STL carries no materials, so this is what lets each part take its own colour), decimates the hull by vertex clustering while leaving the thin spars and sails alone — clustering would eat them — reorients to the game's axes with the waterline at y = 0, and writes an indexed GLB with smooth normals. Result: **0.22 MB, 9,630 triangles**.
-
-The sails are modelled flat on the centre line, which from an astern camera would be edge-on and nearly invisible, so they are parented to a pivot at the mast (`BOAT_MAST_Z`) and sheeted out — the same swing the built-in rig had, and it still trims with the turn.
-
-`BOAT_SCALE` keeps the hull near its old length on purpose: the collision circle is `boat.r` in game units, so a much longer hull would visibly overlap obstacles that never register a hit.
+It took an earlier 15.6 MB / 327,648-triangle sailboat down to 0.22 MB / 9,630 triangles.
 
 ## The llama model
 

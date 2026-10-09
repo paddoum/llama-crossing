@@ -10,7 +10,7 @@ const SKY = 0x9ed9f3;
 const COL = {
   water: 0x2f86c6, grass: 0x6cc04a, grassDark: 0x4f9c37, sand: 0xe8d38a,
   rock: 0x7d8791, log: 0x8b5a2b, logLight: 0xa7713a, logDark: 0x5f3a17,
-  hull: 0xa35f2a, hullDark: 0x6e3d15, deck: 0xc98a4b, sail: 0xfdf6e8, mast: 0x8a6136,
+  hull: 0xa35f2a, hullDark: 0x6e3d15, deck: 0xc98a4b, mast: 0x8a6136,
   wool: 0xf2e6cf, skin: 0xe9d9bc, pink: 0xe8a9a3, ink: 0x2a2420,
   blanketA: 0xc0392b, blanketB: 0x1f6f8b, scarf: 0xe2453b,
   virus: 0xe0479e, virusDark: 0x9c2a68, virusCore: 0xffd3ec, spit: 0xeaffd0,
@@ -31,11 +31,7 @@ const M = {
   hull: mat(COL.hull),
   hullDark: mat(COL.hullDark),
   deck: mat(COL.deck),
-  // Canvas catches light from every side; without the lift the face turned
-  // away from the sun reads as a grey shadow rather than a sail.
-  sail: mat(COL.sail, { side: THREE.DoubleSide, flatShading: false, emissive: 0x9a927a }),
   mast: mat(COL.mast),
-  sailStripe: mat(COL.scarf, { side: THREE.DoubleSide, flatShading: false, emissive: 0x4a1410 }),
   wool: mat(COL.wool, { flatShading: true }),
   skin: mat(COL.skin, { flatShading: false }),
   pink: mat(COL.pink, { flatShading: false }),
@@ -198,12 +194,13 @@ const MENU_BOAT_H = 74, MENU_BOAT_MID = 29;
 // turn to face the bow; the legs drop through the hull and finish below the
 // waterline, where the opaque water hides them.
 const LLAMA_URL = 'assets/llama.glb';
-const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 15.8;
+const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 21.1;
 
-// Sculpted boat (see tools/stl_to_glb.py). Three meshes -- hull, spars, sails
-// -- because STL carries no materials. The sails still swing, about the mast.
-const BOAT_URL = 'assets/boat.glb';
-const BOAT_SCALE = 0.62, BOAT_MAST_Z = -11.6;
+// Sculpted rowboat. Modelled Y-up with the bow at +X, so it gets a quarter
+// turn to point down-river. The oars are separate nodes, so they can row.
+const BOAT_URL = 'assets/rowboat.glb';
+const BOAT_SCALE = 5.7, BOAT_Y = -3.4;          // waterline sits at model y 0.6
+const OARLOCK = { x: -1.2, y: 1.95, z: 1.87 };  // where an oar crosses the gunwale
 
 export class Renderer3D {
   constructor(canvas) {
@@ -259,7 +256,7 @@ export class Renderer3D {
     this.progressDot = document.getElementById('progress-dot');
   }
 
-  // Loaded in the background: the built-in llama sails until this arrives, so
+  // Loaded in the background: the built-in llama rows until this arrives, so
   // a slow connection or a missing file never blocks the game.
   loadLlama() {
     new GLTFLoader().load(LLAMA_URL, (gltf) => {
@@ -287,30 +284,40 @@ export class Renderer3D {
     });
   }
 
-  // Same background-load pattern as the llama: the code-built boat sails until
+  // Same background-load pattern as the llama: the code-built boat rows until
   // the sculpted one arrives.
   loadBoat() {
     new GLTFLoader().load(BOAT_URL, (gltf) => {
       const model = new THREE.Group();
-      model.scale.setScalar(BOAT_SCALE);
-      const sailPivot = new THREE.Group();
-      sailPivot.position.z = BOAT_MAST_Z;       // sails swing about the mast
-      model.add(sailPivot);
+      gltf.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        o.material = new THREE.MeshLambertMaterial({ map: o.material.map, side: THREE.DoubleSide });
+        o.frustumCulled = false;
+      });
+      model.add(gltf.scene);
+      model.updateMatrixWorld(true);   // still at identity, so world == model space
 
-      const paint = { hull: M.hull, spars: M.mast, sails: M.sail };
-      for (const child of [...gltf.scene.children]) {
-        child.traverse((o) => {
-          if (!o.isMesh) return;
-          o.material = paint[child.name] || M.hull;
-          o.frustumCulled = false;
-        });
-        if (child.name === 'sails') {
-          child.position.z -= BOAT_MAST_Z;
-          sailPivot.add(child);
-        } else {
-          model.add(child);
-        }
+      // Hang each oar off a pivot at its oarlock. GLTFLoader sanitises node
+      // names (paddle.001 -> paddle001), so match on a prefix and take each
+      // oar's side from where it actually sits rather than from its name.
+      const oarNodes = [];
+      gltf.scene.traverse((o) => { if (!o.isMesh && /^paddle/i.test(o.name)) oarNodes.push(o); });
+      const oars = [];
+      for (const oar of oarNodes) {
+        const centre = new THREE.Box3().setFromObject(oar).getCenter(new THREE.Vector3());
+        const side = centre.z >= 0 ? 1 : -1;
+        const pivot = new THREE.Group();
+        pivot.position.set(OARLOCK.x, OARLOCK.y, OARLOCK.z * side);
+        model.add(pivot);
+        model.updateMatrixWorld(true);
+        pivot.attach(oar);             // keeps the world transform
+        oars.push({ pivot, side });
       }
+      if (oars.length !== 2) console.warn(`Expected 2 oars, rigged ${oars.length}.`);
+
+      model.scale.setScalar(BOAT_SCALE);
+      model.rotation.y = Math.PI / 2;   // bow is +X in the model
+      model.position.y = BOAT_Y;
 
       const boat = this.boat;
       const builtIn = boat.userData.builtIn;
@@ -318,9 +325,15 @@ export class Renderer3D {
       // Shared materials stay; only the stand-in's own geometry is freed.
       builtIn.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
       boat.add(model);
+
       boat.userData.rig = (t, celebrating, lean = 0) => {
-        const gust = Math.sin(t * 0.7) * 0.05 + Math.sin(t * 1.9) * 0.02;
-        sailPivot.rotation.y = 0.95 + gust - lean * 0.3;
+        const rate = celebrating ? 9 : 4.4;
+        const sweep = Math.sin(t * rate), dip = Math.cos(t * rate);
+        for (const { pivot, side } of oars) {
+          pivot.rotation.y = sweep * 0.52;        // both oars pull together
+          pivot.rotation.x = dip * 0.30 * side;   // blades lift on the recovery
+        }
+        model.rotation.z = -lean * 0.12;
         boat.userData.crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
         boat.userData.liven(t, celebrating);
       };
@@ -840,36 +853,13 @@ function buildViruses(count) {
   return meshes;
 }
 
-// A bermuda sail: luff up the mast, foot along the boom, bellied out by the
-// wind. v0/v1 cut a horizontal band out of it, which is how the stripe is made.
-function makeSailGeometry(boomLen, mastH, depth, v0 = 0, v1 = 1, puff = 1) {
-  const SEG = 9;
-  const P = (u, v) => {
-    const chord = boomLen * (1 - v * 0.84);
-    const belly = Math.sin(Math.PI * u) * Math.sin(Math.PI * v * 0.92) * depth * puff;
-    return [belly, v * mastH, u * chord];
-  };
-  const pos = [];
-  for (let i = 0; i < SEG; i++) {
-    for (let j = 0; j < SEG; j++) {
-      const u0 = i / SEG, u1 = (i + 1) / SEG;
-      const a = v0 + (v1 - v0) * (j / SEG), b = v0 + (v1 - v0) * ((j + 1) / SEG);
-      const p00 = P(u0, a), p10 = P(u1, a), p11 = P(u1, b), p01 = P(u0, b);
-      pos.push(...p00, ...p10, ...p11, ...p00, ...p11, ...p01);
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
-  g.computeVertexNormals();
-  return g;
-}
-
 // Welds many small parts into one geometry. The llama is built from ~150 wool
 // puffs; without this it would cost ~150 draw calls a frame on a phone.
 function weld(parts) {
   let total = 0;
   const prepped = parts.map(({ geo, m }) => {
-    const g = geo.clone().applyMatrix4(m).toNonIndexed();
+    const c = geo.clone().applyMatrix4(m);
+    const g = c.index ? c.toNonIndexed() : c;
     total += g.attributes.position.count;
     return g;
   });
@@ -1031,7 +1021,7 @@ function meshAt(geo, material, pos) {
   return m;
 }
 
-// Llama in a sailing boat. userData.rig(t, celebrating, lean) trims the sail.
+// Llama in a rowing boat. userData.rig(t, celebrating, lean) works the oars.
 function makeLlamaBoat() {
   const g = new THREE.Group();
   // Everything drawn in code lives here, so the sculpted boat can replace it
@@ -1057,29 +1047,26 @@ function makeLlamaBoat() {
   deck.position.y = 6.6;
   builtIn.add(deck);
 
-  // Rig. The mast sits forward and the boom is sheeted out to starboard, so
-  // the sail never masks the stretch of river the camera is looking down.
-  const MAST_H = 58, BOOM_LEN = 38;
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2, MAST_H, 7), M.mast);
-  mast.position.set(0, 8 + MAST_H / 2, -5);
-  builtIn.add(mast);
+  // Oars on the stand-in, to match the sculpted rowboat it hands over to.
+  const oars = [];
+  for (const side of [-1, 1]) {
+    const oar = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 30, 5), M.logDark);
+    shaft.rotation.z = Math.PI / 2;
+    shaft.position.x = side * 15;
+    oar.add(shaft);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(9, 1.2, 6), M.log);
+    blade.position.set(side * 30, 0, 0);
+    oar.add(blade);
+    oar.position.set(0, 8, 2);
+    builtIn.add(oar);
+    oars.push({ oar, side });
+  }
 
-  const rig = new THREE.Group();
-  rig.position.set(0, 9, -5);
-  builtIn.add(rig);
-  const boom = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, BOOM_LEN, 6), M.mast);
-  boom.rotation.x = Math.PI / 2;
-  boom.position.set(0, 0, BOOM_LEN / 2);
-  rig.add(boom);
-  const sail = new THREE.Mesh(makeSailGeometry(BOOM_LEN, MAST_H - 4, 6), M.sail);
-  rig.add(sail);
-  const stripe = new THREE.Mesh(makeSailGeometry(BOOM_LEN, MAST_H - 4, 6, 0.4, 0.54, 1.04), M.sailStripe);
-  rig.add(stripe);
-
-  // Whoever is sailing sits in this group, so the sculpted model can replace
+  // Whoever is rowing sits in this group, so the sculpted model can replace
   // the built-in llama once it has downloaded without disturbing the boat.
   const crew = new THREE.Group();
-  crew.position.set(0, 0, 6);
+  crew.position.set(0, 0, 7);
   g.add(crew);
   const { group: llama, animate: liven } = makeLlama();
   llama.scale.setScalar(9.5);
@@ -1089,13 +1076,12 @@ function makeLlamaBoat() {
   g.userData.crew = crew;
   g.userData.liven = liven;
 
-  // Sheet the boom with the turn and let the sail breathe.
   g.userData.rig = (t, celebrating, lean = 0) => {
-    const gust = Math.sin(t * 0.7) * 0.05 + Math.sin(t * 1.9) * 0.02;
-    rig.rotation.y = 0.95 + gust - lean * 0.3;
-    const belly = 1 + Math.sin(t * 1.6) * 0.05;
-    sail.scale.x = belly;
-    stripe.scale.x = belly;
+    const sw = Math.sin(t * (celebrating ? 9 : 4.4));
+    for (const { oar, side } of oars) {
+      oar.rotation.x = sw * 0.5;
+      oar.rotation.z = side * sw * 0.12;
+    }
     crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
     g.userData.liven(t, celebrating);
   };

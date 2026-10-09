@@ -260,3 +260,11 @@ a.btn { text-decoration: none; display: flex; align-items: center; justify-conte
   background: var(--cream);
   border: 1.5px solid #6e3d15;
 }
+
+/* Model attribution (CC BY requires it to be visible) */
+.credit {
+  margin-top: 2px;
+  font-size: 12px;
+  opacity: .72;
+}
+.credit a { color: inherit; pointer-events: auto; }
