@@ -188,6 +188,11 @@ function makeWaterMaterial({ amp, shore }) {
 // looks down ~29 degrees, so the river fills the frame with a sliver of sky.
 const FOV = 68, CAM_BACK = 150, CAM_UP = 170, LOOK_AHEAD = 150, LOOK_UP = 4;
 
+// Menu backdrop. The boat has to fit the strip of screen the menu buttons
+// leave free, which varies with the screen and the window, so the camera
+// distance is derived from that strip rather than fixed.
+const MENU_BOAT_H = 74, MENU_BOAT_MID = 29;
+
 export class Renderer3D {
   constructor(canvas) {
     // preserveDrawingBuffer keeps the last frame readable by gl.readPixels after
@@ -230,6 +235,8 @@ export class Renderer3D {
     this.spitPool = [];
     this.lastT = 0;
     this.camLook = new THREE.Vector3(0, 0, -LOOK_AHEAD);
+    this.menuLook = new THREE.Vector3(0, 12, -120);
+    this.menuTip = new THREE.Vector3();
 
     this.fx = document.getElementById('fx');
     this.progress = document.getElementById('progress');
@@ -457,6 +464,50 @@ export class Renderer3D {
     this.renderer.render(this.scene, this.camera);
   }
 
+  // How far down the screen the active menu's controls reach, in NDC.
+  menuClearNdc() {
+    const screen = document.querySelector('.screen.active');
+    if (!screen) return 0.1;
+    let bottom = 0;
+    for (const el of screen.children) bottom = Math.max(bottom, el.getBoundingClientRect().bottom);
+    if (!bottom) return 0.1;
+    return 1 - 2 * (bottom / window.innerHeight);
+  }
+
+  // Frames the whole boat inside the strip left free below the menu buttons,
+  // solved against the real projection so it holds at any window shape.
+  frameMenuBoat(t) {
+    const clear = this.menuClearNdc();
+    const band = Math.max(0.24, clear + 1);
+    const tanHalf = Math.tan((this.camera.fov / 2) * Math.PI / 180);
+    // Fill most of the strip, then back off far enough to actually fit.
+    const wantHeight = Math.min(band * 0.72, 0.40);
+    const dist = Math.max(240, Math.min(900, MENU_BOAT_H / (wantHeight * tanHalf)));
+
+    const a = t * 0.12;
+    const b = this.boat.position;
+    // Sit high relative to the distance. The boat has to end up low in frame,
+    // so the camera has to look down to get there -- at a shallower angle it
+    // ends up aiming at the horizon and the menu fills with empty sky.
+    this.camera.position.set(
+      b.x * 0.5 + Math.sin(a) * dist * 0.16,
+      dist * 0.95,
+      b.z + dist + Math.cos(a) * dist * 0.1,
+    );
+
+    const targetY = (clear - 1) / 2;                 // middle of the free strip
+    const targetX = Math.sin(t * 0.3) * 0.18;
+    for (let i = 0; i < 3; i++) {
+      this.camera.lookAt(this.menuLook);
+      this.camera.updateMatrixWorld(true);
+      this.menuTip.set(b.x, b.y + MENU_BOAT_MID, b.z).project(this.camera);
+      const gain = tanHalf * this.camera.position.distanceTo(this.menuLook);
+      this.menuLook.y += (this.menuTip.y - targetY) * gain;
+      this.menuLook.x += (this.menuTip.x - targetX) * gain * this.camera.aspect;
+    }
+    this.camera.lookAt(this.menuLook);
+  }
+
   renderBackdrop(t) {
     this.lastT = t;
     this.setRiverShape(MENU_RIVER);
@@ -465,16 +516,14 @@ export class Renderer3D {
     this.progress.classList.add('hidden');
     this.fx.style.opacity = 0;
 
-    const bx = Math.sin(t * 0.35) * 42, bz = 0;
+    const bx = Math.sin(t * 0.35) * 34, bz = 0;
     const h = waveAt(bx, bz, t);
     this.boat.position.set(bx, h + 2, bz);
     this.boat.rotation.set(0, Math.sin(t * 0.35) * 0.25, Math.cos(t * 0.35) * 0.12);
     this.boat.visible = true;
     this.boat.userData.rig(t, false, Math.sin(t * 0.35) * 0.3);
 
-    const a = t * 0.12;
-    this.camera.position.set(Math.sin(a) * 90, 96, 150 + Math.cos(a) * 34);
-    this.camera.lookAt(0, 14, -40);
+    this.frameMenuBoat(t);
 
     this.updateParticles(null, t);
     this.updateWater(this.camera.position.x, this.camera.position.z, t);
