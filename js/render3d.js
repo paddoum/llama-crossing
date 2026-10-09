@@ -194,12 +194,19 @@ const MENU_BOAT_H = 74, MENU_BOAT_MID = 29;
 // turn to face the bow; the legs drop through the hull and finish below the
 // waterline, where the opaque water hides them.
 const LLAMA_URL = 'assets/llama.glb';
-const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 21.1;
+// Seated: dropped so the gunwale crosses above the legs, which puts the body
+// in the boat rather than standing over it. The legs run on through the hull
+// and finish under the waterline, where the opaque water hides them.
+const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 16.4;
 
 // Sculpted rowboat. Modelled Y-up with the bow at +X, so it gets a quarter
 // turn to point down-river. The oars are separate nodes, so they can row.
 const BOAT_URL = 'assets/rowboat.glb';
-const BOAT_SCALE = 5.7, BOAT_Y = -3.4;          // waterline sits at model y 0.6
+// The hull is shallow next to the wave amplitude, and the boat takes its
+// height from a single wave sample at its centre, so the ends can dip. It
+// rides high enough that the floor stays dry; the camera looks down, so the
+// gap under the hull is hidden by the hull itself.
+const BOAT_SCALE = 5.7, BOAT_Y = 0.8, HULL_HALF = 29;
 const OARLOCK = { x: -1.2, y: 1.95, z: 1.87 };  // where an oar crosses the gunwale
 
 export class Renderer3D {
@@ -515,9 +522,13 @@ export class Renderer3D {
     const b = session.boat, level = session.level;
     const bx = b.x - HALF, bz = -b.y;
 
-    // Boat rides the surface: height from the wave, pitch from its slope.
-    const h = waveAt(bx, bz, t);
-    const slope = (waveAt(bx, bz - 14, t) - waveAt(bx, bz + 14, t)) / 28;
+    // Boat rides the surface. Sample at the actual ends of the hull, not just
+    // under its middle: with a hull this long against these wavelengths, a
+    // single centre sample lets the bow and stern dip under and ship water.
+    const hBow = waveAt(bx, bz - HULL_HALF, t);
+    const hStern = waveAt(bx, bz + HULL_HALF, t);
+    const h = Math.max(waveAt(bx, bz, t), (hBow + hStern) / 2);
+    const slope = (hBow - hStern) / (HULL_HALF * 2);
     this.boat.position.set(bx, h + 2, bz);
     this.boat.rotation.set(Math.atan(slope) * 0.8, -b.lean * 0.3, -b.lean * 0.45);
     this.boat.visible = !(b.invuln > 0 && Math.floor(t * 14) % 2 === 0);
