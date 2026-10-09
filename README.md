@@ -72,6 +72,20 @@ js/version.js         build label
 
 `state.js` is renderer-agnostic: it takes an object exposing `renderSession(session, t)` and `renderBackdrop(t)`, which is the whole seam between the two builds.
 
+## The boat model
+
+`assets/boat.glb` comes from a printable STL via `tools/stl_to_glb.py`, which is kept so the conversion is reproducible:
+
+```bash
+python3 tools/stl_to_glb.py Bateau_V6.stl assets/boat.glb
+```
+
+The source was **15.6 MB / 327,648 triangles** — a 3D-printing model at sub-millimetre density, Z-up, bow at +Y, with a flat base plate under the hull. The script drops the plate, splits the mesh into **hull / spars / sails** (STL carries no materials, so this is what lets each part take its own colour), decimates the hull by vertex clustering while leaving the thin spars and sails alone — clustering would eat them — reorients to the game's axes with the waterline at y = 0, and writes an indexed GLB with smooth normals. Result: **0.22 MB, 9,630 triangles**.
+
+The sails are modelled flat on the centre line, which from an astern camera would be edge-on and nearly invisible, so they are parented to a pivot at the mast (`BOAT_MAST_Z`) and sheeted out — the same swing the built-in rig had, and it still trims with the turn.
+
+`BOAT_SCALE` keeps the hull near its old length on purpose: the collision circle is `boat.r` in game units, so a much longer hull would visibly overlap obstacles that never register a hit.
+
 ## The llama model
 
 `assets/llama.glb` is a sculpted llama (single mesh, 31k triangles, one baked colour texture). It is fetched in the background: the code-built llama sails the boat until the model arrives, so a slow connection -- or a missing file -- never blocks the game. `js/render3d.js` swaps it into the boat's `crew` group on load.

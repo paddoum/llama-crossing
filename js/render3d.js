@@ -198,7 +198,12 @@ const MENU_BOAT_H = 74, MENU_BOAT_MID = 29;
 // turn to face the bow; the legs drop through the hull and finish below the
 // waterline, where the opaque water hides them.
 const LLAMA_URL = 'assets/llama.glb';
-const LLAMA_MODEL_SCALE = 35, LLAMA_MODEL_Y = 10.5;
+const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 15.8;
+
+// Sculpted boat (see tools/stl_to_glb.py). Three meshes -- hull, spars, sails
+// -- because STL carries no materials. The sails still swing, about the mast.
+const BOAT_URL = 'assets/boat.glb';
+const BOAT_SCALE = 0.62, BOAT_MAST_Z = -11.6;
 
 export class Renderer3D {
   constructor(canvas) {
@@ -246,6 +251,7 @@ export class Renderer3D {
     this.menuTip = new THREE.Vector3();
 
     this.loadLlama();
+    this.loadBoat();
 
     this.fx = document.getElementById('fx');
     this.progress = document.getElementById('progress');
@@ -278,6 +284,49 @@ export class Renderer3D {
       this.llamaModel = model;
     }, undefined, (err) => {
       console.warn('Llama model failed to load; keeping the built-in one.', err);
+    });
+  }
+
+  // Same background-load pattern as the llama: the code-built boat sails until
+  // the sculpted one arrives.
+  loadBoat() {
+    new GLTFLoader().load(BOAT_URL, (gltf) => {
+      const model = new THREE.Group();
+      model.scale.setScalar(BOAT_SCALE);
+      const sailPivot = new THREE.Group();
+      sailPivot.position.z = BOAT_MAST_Z;       // sails swing about the mast
+      model.add(sailPivot);
+
+      const paint = { hull: M.hull, spars: M.mast, sails: M.sail };
+      for (const child of [...gltf.scene.children]) {
+        child.traverse((o) => {
+          if (!o.isMesh) return;
+          o.material = paint[child.name] || M.hull;
+          o.frustumCulled = false;
+        });
+        if (child.name === 'sails') {
+          child.position.z -= BOAT_MAST_Z;
+          sailPivot.add(child);
+        } else {
+          model.add(child);
+        }
+      }
+
+      const boat = this.boat;
+      const builtIn = boat.userData.builtIn;
+      boat.remove(builtIn);
+      // Shared materials stay; only the stand-in's own geometry is freed.
+      builtIn.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      boat.add(model);
+      boat.userData.rig = (t, celebrating, lean = 0) => {
+        const gust = Math.sin(t * 0.7) * 0.05 + Math.sin(t * 1.9) * 0.02;
+        sailPivot.rotation.y = 0.95 + gust - lean * 0.3;
+        boat.userData.crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
+        boat.userData.liven(t, celebrating);
+      };
+      this.boatModel = model;
+    }, undefined, (err) => {
+      console.warn('Boat model failed to load; keeping the built-in one.', err);
     });
   }
 
@@ -985,6 +1034,11 @@ function meshAt(geo, material, pos) {
 // Llama in a sailing boat. userData.rig(t, celebrating, lean) trims the sail.
 function makeLlamaBoat() {
   const g = new THREE.Group();
+  // Everything drawn in code lives here, so the sculpted boat can replace it
+  // wholesale once it downloads.
+  const builtIn = new THREE.Group();
+  g.add(builtIn);
+  g.userData.builtIn = builtIn;
 
   // Hull: the 2D silhouette, extruded. Bow points downriver (-Z).
   const shape = new THREE.Shape();
@@ -997,22 +1051,22 @@ function makeLlamaBoat() {
   hullGeo.rotateX(Math.PI / 2);
   const hull = new THREE.Mesh(hullGeo, M.hull);
   hull.position.y = 6;
-  g.add(hull);
+  builtIn.add(hull);
 
   const deck = new THREE.Mesh(new THREE.BoxGeometry(20, 2, 36), M.deck);
   deck.position.y = 6.6;
-  g.add(deck);
+  builtIn.add(deck);
 
   // Rig. The mast sits forward and the boom is sheeted out to starboard, so
   // the sail never masks the stretch of river the camera is looking down.
   const MAST_H = 58, BOOM_LEN = 38;
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2, MAST_H, 7), M.mast);
   mast.position.set(0, 8 + MAST_H / 2, -5);
-  g.add(mast);
+  builtIn.add(mast);
 
   const rig = new THREE.Group();
   rig.position.set(0, 9, -5);
-  g.add(rig);
+  builtIn.add(rig);
   const boom = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, BOOM_LEN, 6), M.mast);
   boom.rotation.x = Math.PI / 2;
   boom.position.set(0, 0, BOOM_LEN / 2);
@@ -1025,7 +1079,7 @@ function makeLlamaBoat() {
   // Whoever is sailing sits in this group, so the sculpted model can replace
   // the built-in llama once it has downloaded without disturbing the boat.
   const crew = new THREE.Group();
-  crew.position.set(0, 0, 3);
+  crew.position.set(0, 0, 6);
   g.add(crew);
   const { group: llama, animate: liven } = makeLlama();
   llama.scale.setScalar(9.5);
