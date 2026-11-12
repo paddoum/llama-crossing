@@ -20,6 +20,11 @@
   --cream: var(--white);
   --orange: var(--deep-cyan);
   --orange-dark: #04697f;
+  /* The visible slice of the screen, in px, written by js/viewport.js. The
+     fallbacks only have to hold for the first paint. */
+  --vvw: 100vw;
+  --vvh: 100dvh;
+
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
@@ -28,12 +33,28 @@
 
 * { box-sizing: border-box; }
 
-html, body {
+html {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
-  height: 100dvh;
+  overflow: hidden;
+}
+
+/*
+ * The stage. On a phone `position: fixed` resolves against the *large*
+ * viewport -- the whole screen, toolbar strip included -- so anything pinned
+ * to the bottom ends up behind the browser's own bar and anything stretched
+ * to `inset: 0` is taller than what you can see. Body is sized to the visible
+ * viewport instead and made the containing block, so the canvas, the HUD and
+ * the menus are all centred on the part of the screen the player has.
+ */
+body {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  width: var(--vvw);
+  height: var(--vvh);
   overflow: hidden;
   background: var(--navy);
   font-family: "Barlow Condensed", "din-condensed", "DIN Condensed", "Arial Narrow", system-ui, sans-serif;
@@ -47,14 +68,17 @@ html, body {
 }
 
 #game {
-  position: fixed;
-  inset: 0;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
   display: block;
   touch-action: none;
 }
 
 .layer {
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
 }
@@ -200,7 +224,7 @@ p { margin: 0; font-size: 17px; }
 .stars .off { color: rgba(255,255,255,.25); text-shadow: none; }
 
 #version {
-  position: fixed;
+  position: absolute;
   left: calc(10px + var(--safe-left));
   bottom: calc(8px + var(--safe-bottom));
   font-size: 12px;
@@ -212,7 +236,7 @@ p { margin: 0; font-size: 17px; }
 }
 
 #toast {
-  position: fixed;
+  position: absolute;
   left: 50%;
   bottom: calc(14% + var(--safe-bottom));
   transform: translateX(-50%);
@@ -240,7 +264,7 @@ a.btn { text-decoration: none; display: flex; align-items: center; justify-conte
 
 /* Hit flash / whirlpool pull tint (the 3D build has no canvas HUD layer) */
 #fx {
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
   opacity: 0;
@@ -249,7 +273,7 @@ a.btn { text-decoration: none; display: flex; align-items: center; justify-conte
 
 /* A → B progress rail */
 #progress {
-  position: fixed;
+  position: absolute;
   right: calc(8px + var(--safe-right));
   top: 76px;
   bottom: calc(26px + var(--safe-bottom));
@@ -298,3 +322,35 @@ a.btn { text-decoration: none; display: flex; align-items: center; justify-conte
   opacity: .72;
 }
 .credit a { color: inherit; pointer-events: auto; }
+
+/*
+ * Short stages: a phone turned sideways, or a browser whose toolbars eat most
+ * of the height. The menu block is taller than the stage there, so it spills
+ * past both edges and stops reading as centred -- and the CC BY credit line,
+ * which the model licences require to stay visible, is the first thing to go
+ * off the bottom. Tighten it until it fits.
+ */
+@media (max-height: 560px) {
+  .screen {
+    gap: 8px;
+    padding-top: calc(10px + var(--safe-top));
+    padding-bottom: calc(10px + var(--safe-bottom));
+  }
+  #brand { gap: 2px; margin-bottom: 2px; }
+  #brand .wordmark { font-size: clamp(28px, 9vh, 46px); }
+  h2 { font-size: 26px; margin-bottom: 4px; }
+  .tag { margin: 0 0 8px; font-size: 15px; }
+  .mode-tag { margin: -2px 0 4px; }
+  .btn { min-width: 190px; min-height: 44px; padding: 9px 22px; font-size: 18px; }
+  .stars { font-size: 30px; letter-spacing: 4px; }
+  .credit { font-size: 11px; max-width: 420px; }
+  /* Three across instead of two: two rows of cards fit, three do not. */
+  #level-grid {
+    gap: 8px;
+    grid-template-columns: repeat(3, minmax(90px, 1fr));
+    width: min(100%, 480px);
+  }
+  .level-card { min-height: 64px; padding: 8px; }
+  .level-card .name { font-size: 12px; }
+  .level-card .num { font-size: 21px; }
+}

@@ -5,6 +5,7 @@ import { Input } from './input.js';
 import { App } from './state.js';
 import { renderSession, renderBackdrop } from './render.js';
 import { VERSION } from './version.js';
+import { watchViewport } from './viewport.js';
 
 document.getElementById('version').textContent = 'v' + VERSION;
 
@@ -14,10 +15,11 @@ const ctx = canvas.getContext('2d');
 // Logical view: always LOGICAL_W wide; height follows the play column's aspect.
 const view = { W: LOGICAL_W, H: 640, scale: 1, offsetX: 0, dpr: 1 };
 
+// w/h come from the visible viewport (see js/viewport.js), not from the
+// layout viewport -- on a phone the latter runs on behind the browser toolbar.
 let lastW = 0, lastH = 0;
-function resize() {
+function resize(w, h) {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  const w = window.innerWidth, h = window.innerHeight;
   lastW = w; lastH = h;
   canvas.width = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
@@ -61,9 +63,8 @@ const renderer = {
 const app = new App(view, sfx, input, renderer);
 window.__app = app; // handy for debugging in devtools
 
-window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', () => setTimeout(resize, 50));
-resize();
+const viewport = watchViewport(resize);
+resize(viewport.width(), viewport.height());
 
 const STEP = 1 / 60;
 let last = performance.now();
@@ -74,7 +75,7 @@ function frame(now) {
   // Schedule first so a thrown error in one frame can't kill the loop.
   requestAnimationFrame(frame);
   // Some environments (in-app browsers, emulated viewports) change size without firing resize.
-  if (window.innerWidth !== lastW || window.innerHeight !== lastH) resize();
+  if (viewport.width() !== lastW || viewport.height() !== lastH) viewport.update();
   // A hidden/zero-size viewport (e.g. a pane still opening) gives a non-finite view.H.
   if (!(view.H > 0) || !(view.scale > 0)) { last = now; return; }
   let dt = (now - last) / 1000;

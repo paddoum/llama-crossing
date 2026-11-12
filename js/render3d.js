@@ -599,7 +599,11 @@ export class Renderer3D {
 
   resize(w, h, dpr) {
     this.renderer.setPixelRatio(dpr);
-    this.renderer.setSize(w, h, false);
+    // updateStyle: true. The CSS box and the drawing buffer have to describe
+    // the same rectangle or the picture is stretched to fit -- which is what
+    // happened on iOS, where the canvas stretched across the layout viewport
+    // while the buffer was cut to the visible one.
+    this.renderer.setSize(w, h, true);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -871,8 +875,11 @@ export class Renderer3D {
     if (!screen) return 0.1;
     let bottom = 0;
     for (const el of screen.children) bottom = Math.max(bottom, el.getBoundingClientRect().bottom);
-    if (!bottom) return 0.1;
-    return 1 - 2 * (bottom / window.innerHeight);
+    // Against the stage, not the layout viewport: on a phone they differ by
+    // the toolbar, and that error would push the boat off the bottom.
+    const stage = this.renderer.domElement.clientHeight || window.innerHeight;
+    if (!bottom || !stage) return 0.1;
+    return 1 - 2 * (bottom / stage);
   }
 
   // Frames the whole boat inside the strip left free below the menu buttons,

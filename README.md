@@ -59,6 +59,49 @@ Three hearts per crossing. Rocks, logs, whirlpool cores and virus contact each c
 
 Upload the folder as-is to any static host (GitHub Pages, Netlify, Vercel, Cloudflare Pages). The `manifest.webmanifest` lets players add it to their home screen as a standalone app.
 
+## Fitting a phone screen
+
+The game is sized to the **visual** viewport, never to the layout viewport.
+
+On a phone these are not the same rectangle. `position: fixed`, `inset: 0`
+and `100vh` all resolve against the *large* viewport — the whole screen,
+including the strip hidden behind the browser's own toolbar — while
+`visualViewport` reports what is actually on show. The 3D build used to cut
+its drawing buffer to one and stretch its canvas across the other, so on iOS
+the picture was squashed vertically and its bottom third, where the boat
+sits, was parked behind Safari's bottom bar. The `v` label and the A→B
+progress rail went the same way.
+
+`js/viewport.js` takes one measurement, publishes it as the CSS variables
+`--vvw` / `--vvh`, and calls back when it changes (window resize,
+orientation, and `visualViewport`'s own resize/scroll as the URL bar slides
+away). From there:
+
+- `body` is the stage: `position: relative`, exactly `--vvw` × `--vvh`.
+- The canvas and every `.layer`, plus the HUD, the progress rail, the toast
+  and the version label, are `position: absolute` inside it — so they are
+  centred on what the player can see, not on what the browser reserves.
+- `Renderer3D.resize` calls `setSize(w, h, true)`. The CSS box and the
+  drawing buffer must describe the same rectangle or the picture is stretched
+  to fit; `updateStyle: false` was exactly that bug.
+- `menuClearNdc()` measures against the canvas, not `window.innerHeight`.
+
+A short stage — a phone turned sideways, or a browser whose toolbars eat the
+height — gets a `max-height: 560px` block that tightens the menus and puts
+the level grid on three columns, so every screen still fits (the CC BY credit
+line is the first thing to fall off the bottom otherwise, and the model
+licences require it to stay visible).
+
+To check this without a phone, fake the divergence in devtools:
+
+```js
+Object.defineProperty(visualViewport, 'height', { configurable: true, get: () => 700 });
+visualViewport.dispatchEvent(new Event('resize'));
+```
+
+The stage should become 700 tall while a scratch `position: fixed; inset: 0`
+probe still measures the full `innerHeight`.
+
 ## Version label / caching
 
 The bottom-left label (e.g. `v8`) comes from `js/version.js`. **Bump it whenever you deploy** — it is how you tell whether a browser is running the latest files or a cached older build.
@@ -89,6 +132,7 @@ js/input.js           pointer drag, tap detection, keyboard
 js/audio.js           WebAudio synth SFX (no audio files)
 js/storage.js         localStorage progress
 js/version.js         build label
+js/viewport.js        measures the visible viewport, shared by both builds
 ```
 
 `state.js` is renderer-agnostic: it takes an object exposing `renderSession(session, t)` and `renderBackdrop(t)`, which is the whole seam between the two builds.
