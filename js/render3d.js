@@ -70,66 +70,91 @@ const hash = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - M
 // swims when the sheet moves, and the sheet's amplitude tapers at its rim so
 // it meets the far plane invisibly.
 const WATER_SIZE = 1800, WATER_SEG = 60, WATER_HALF = WATER_SIZE / 2;
+
+// Wave shape taken from the Argonaut United app's own home-screen ocean
+// (src/components/shader/shaders/bluestorm.frag), which adapts afl_ext's
+// "Ocean" from Shadertoy (MIT, https://www.shadertoy.com/view/MdXyzX).
+//
+// The app raymarches a fullscreen ocean with a fixed camera and no geometry;
+// that cannot host a boat, sharks and buoys at correct depths, so what is
+// reused here is the wave FUNCTION, not the raymarcher: exp(sin(x) - 1)
+// summed over octaves, each octave dragging the sample point along its own
+// direction. That is what gives sharp crests over broad flat troughs -- and
+// flat troughs are exactly what a faceted surface needs, because gentle sine
+// swell leaves neighbouring facets shaded almost alike.
+const WAVE = {
+  scale: 0.040,        // game units -> the app's wave space (base length ~157u)
+  amp: 5.4,            // vertical span, matched to what the boat used to ride
+  freq: 1.0,
+  drag: 0.38,          // DRAG_MULT
+  lacunarity: 1.18,
+  persistence: 0.8,
+  timeFalloff: 1.07,
+  speed: 0.6,
+  octavesGPU: 8,
+  octavesCPU: 6,       // the boat only needs the broad swell
+};
+
 const FLOW = 34;
 
-// Gerstner waves (Tardif's "Water Walkthrough", in turn from GPU Gems ch.1),
-// not a plain sine sum. Same cost -- no textures, no extra passes -- but the
-// horizontal displacement pinches the crests and flattens the troughs, so
-// neighbouring facets tilt against each other instead of shading almost alike.
-// SSR, flow maps and depth-buffer shorelines from those write-ups are left
-// out on purpose: too expensive for a phone, per the Azur Games budget of a
-// few wave cycles and a handful of textures.
-//
-// KEEP IN SYNC with gerstner() in the vertex shader below. The JS copy returns
-// only the vertical term, evaluated at the undisplaced position: that is the
-// usual buoyancy approximation, and it is what floats the boat, the spit and
-// the foam particles.
-const WAVES = [
-  { dx: 0.866, dz: 0.503, len: 175, amp: 2.10, speed: 9.8, steep: 0.75 },
-  { dx: -0.207, dz: 0.978, len: 118, amp: 1.50, speed: 3.9, steep: 0.65 },
-  { dx: 0.707, dz: 0.707, len: 52, amp: 0.70, speed: 5.8, steep: 0.45 },
-  { dx: 0.817, dz: -0.577, len: 30, amp: 0.35, speed: 6.2, steep: 0.30 },
-];
-
-const TAU = Math.PI * 2;
+// KEEP IN SYNC with getwaves() in the vertex shader. This copy floats the
+// boat, the spit and the foam particles; it runs fewer octaves, which costs a
+// little accuracy in the ripples and none in the swell that matters.
+function rawWaves(px, pz, t, octaves) {
+  const phase = Math.sqrt(px * px + pz * pz) * 0.1;
+  let iter = 0, freq = WAVE.freq, tMul = WAVE.speed, weight = 1, sumV = 0, sumW = 0;
+  for (let i = 0; i < octaves; i++) {
+    const dx = Math.sin(iter), dz = Math.cos(iter);
+    const x = (dx * px + dz * pz) * freq + t * tMul + phase;
+    const wave = Math.exp(Math.sin(x) - 1);
+    const deriv = -wave * Math.cos(x);
+    px += dx * deriv * weight * WAVE.drag;
+    pz += dz * deriv * weight * WAVE.drag;
+    sumV += wave * weight;
+    sumW += weight;
+    weight *= WAVE.persistence;
+    freq *= WAVE.lacunarity;
+    tMul *= WAVE.timeFalloff;
+    iter += 1232.399963;
+  }
+  return sumV / sumW;
+}
 
 function waveAt(x, z, t) {
   const zf = z + t * FLOW;
-  let h = 0;
-  for (const { dx, dz, len, amp, speed } of WAVES) {
-    const freq = TAU / len;
-    h += amp * Math.sin(freq * (dx * x + dz * zf) + t * speed * freq);
-  }
-  return h;
+  return (rawWaves(x * WAVE.scale, zf * WAVE.scale, t, WAVE.octavesCPU) - 0.5) * WAVE.amp;
 }
-
-const WAVE_GLSL = WAVES.map(({ dx, dz, len, amp, speed, steep }) => {
-  const freq = (TAU / len).toFixed(5);
-  const qi = (steep / (amp * (TAU / len) * WAVES.length)).toFixed(4);
-  return `  d = vec2(${dx.toFixed(3)}, ${dz.toFixed(3)});
-  rad = ${freq} * dot(d, q) + uTime * ${(speed * (TAU / len)).toFixed(4)};
-  c = cos(rad); sn = sin(rad);
-  disp.xz += ${qi} * ${amp.toFixed(2)} * d * c;
-  disp.y += ${amp.toFixed(2)} * sn;
-  dxz += ${freq} * ${amp.toFixed(2)} * c * d;`;
-}).join('\n');
 
 const WATER_VERT = `
 #include <fog_pars_vertex>
 uniform float uTime, uFlow, uAmp, uTaperHalf;
 varying vec3 vWorld;
-varying vec3 vWNormal;
 varying float vCrest;
 
-// Returns the Gerstner displacement for a point, and the gradient of its
-// vertical term, which is what the smooth normal is built from.
-vec3 gerstner(vec2 p, out vec2 dxz) {
-  vec2 q = vec2(p.x, p.y + uFlow * uTime);
-  vec3 disp = vec3(0.0);
-  vec2 d; float rad, c, sn;
-  dxz = vec2(0.0);
-${WAVE_GLSL}
-  return disp;
+// afl_ext's octave: a sharp-crested wave, with the sample point dragged along
+// the wave direction so the crests pile up instead of staying sinusoidal.
+vec2 wavedx(vec2 position, vec2 direction, float frequency, float timeshift) {
+  float x = dot(direction, position) * frequency + timeshift;
+  float wave = exp(sin(x) - 1.0);
+  return vec2(wave, -wave * cos(x));
+}
+
+float getwaves(vec2 position) {
+  float phase = length(position) * 0.1;
+  float iter = 0.0, frequency = ${WAVE.freq.toFixed(2)}, tMul = ${WAVE.speed.toFixed(2)};
+  float weight = 1.0, sumV = 0.0, sumW = 0.0;
+  for (int i = 0; i < ${WAVE.octavesGPU}; i++) {
+    vec2 d = vec2(sin(iter), cos(iter));
+    vec2 res = wavedx(position, d, frequency, uTime * tMul + phase);
+    position += d * res.y * weight * ${WAVE.drag.toFixed(2)};
+    sumV += res.x * weight;
+    sumW += weight;
+    weight *= ${WAVE.persistence.toFixed(2)};
+    frequency *= ${WAVE.lacunarity.toFixed(2)};
+    tMul *= ${WAVE.timeFalloff.toFixed(2)};
+    iter += 1232.399963;
+  }
+  return sumV / sumW;
 }
 
 void main() {
@@ -137,13 +162,11 @@ void main() {
   // Flatten towards the rim of the sheet so it blends into the far plane.
   float edge = max(abs(position.x), abs(position.y)) / uTaperHalf;
   float amp = uAmp * (1.0 - smoothstep(0.55, 1.0, edge));
-  vec2 grad;
-  vec3 disp = gerstner(world.xz, grad);
-  world.xz += amp * disp.xz;
-  world.y += amp * disp.y;
+  vec2 p = vec2(world.x, world.z + uFlow * uTime) * ${WAVE.scale.toFixed(3)};
+  float h = (getwaves(p) - 0.5) * ${WAVE.amp.toFixed(2)};
+  world.y += amp * h;
   vWorld = world.xyz;
-  vCrest = amp * disp.y;
-  vWNormal = normalize(vec3(-amp * grad.x, 1.0, -amp * grad.y));
+  vCrest = amp * h;
   vec4 mvPosition = viewMatrix * world;
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -152,48 +175,41 @@ void main() {
 const WATER_FRAG = `
 #include <fog_pars_fragment>
 uniform vec3 uSunDir, uSunCol, uSkyCol, uGroundCol, uShallow, uDeep, uFoam, uCamPos;
-uniform float uTime, uMeanderAmp, uMeanderLen, uHalfWidth, uShore, uFacet;
+uniform float uTime, uMeanderAmp, uMeanderLen, uHalfWidth, uShore, uFacet, uSkyFloor;
 varying vec3 vWorld;
-varying vec3 vWNormal;
 varying float vCrest;
 
 // Constant across a triangle, because it is derived from the facet normal.
 float facetNoise(vec3 n) {
-  return fract(sin(dot(n.xz, vec2(12.9898, 78.233)) * 43.17) * 43758.5453);
+  return fract(sin(dot(n.xz, vec2(12.9898, 78.233)) * 431.7) * 43758.5453);
 }
 
 void main() {
-  // Flat shading, the low-poly way: take the normal from the derivatives of
-  // the world position, so it is constant across each triangle and the sea
-  // breaks into facets instead of a smooth sheet. The smooth analytic normal
-  // is kept for the broad lighting, so the swell still reads at distance.
+  // Flat shading, the low-poly way: the normal comes from the derivatives of
+  // the world position, so it is constant across each triangle. With the
+  // app's sharp-crested waves the facets genuinely tilt against each other,
+  // which is what makes the sea read as faceted rather than smooth.
   vec3 flatN = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
   if (flatN.y < 0.0) flatN = -flatN;
-  vec3 smoothN = normalize(vWNormal);
-  vec3 N = normalize(mix(smoothN, flatN, uFacet));
+  vec3 N = normalize(mix(vec3(0.0, 1.0, 0.0), flatN, uFacet));
   vec3 V = normalize(uCamPos - vWorld);
 
   vec3 ambient = mix(uGroundCol, uSkyCol, N.y * 0.5 + 0.5);
   float diff = max(dot(N, uSunDir), 0.0);
   vec3 base = mix(uDeep, uShallow, smoothstep(-2.0, 2.2, vCrest));
-
-  // A little tint per facet, so neighbouring planes separate the way they do
-  // in low-poly art rather than blending into each other.
   base *= 0.90 + facetNoise(flatN) * 0.24;
 
   vec3 col = base * (ambient * 0.78 + uSunCol * diff * 0.45);
+  vec3 Hv = normalize(uSunDir + V);
+  col += uSunCol * pow(max(dot(N, Hv), 0.0), 110.0) * 1.6;
 
-  // Glitter. Flat normals turn this into per-facet glints rather than a smear.
-  vec3 H = normalize(uSunDir + V);
-  col += uSunCol * pow(max(dot(N, H), 0.0), 110.0) * 1.6;
+  // The app lifts the sky reflection to a floor, because fresnel alone leaves
+  // head-on water almost reflection-free and flat. Same trick here.
+  float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
+  float skyAmount = uSkyFloor + (1.0 - uSkyFloor) * fres;
+  col = mix(col, uSkyCol, skyAmount * 0.45);
 
-  // Grazing angles pick up the sky, which is what reads as "wet".
-  col = mix(col, uSkyCol, pow(1.0 - max(dot(N, V), 0.0), 4.0) * 0.30);
-
-  // Foam on the crests, stepped so it lands as whitecaps on whole facets
-  // instead of fading across them.
-  // Foam from crest height and from how steeply the facet tilts -- Tardif
-  // drives his off the normal's angle to up for the same reason. Stepped, so
+  // Foam from crest height and from how steeply the facet tilts. Stepped, so
   // it lands on whole facets as whitecaps rather than fading across them.
   float crest = smoothstep(1.4, 3.1, vCrest + facetNoise(flatN) * 0.7);
   float tilt = smoothstep(0.10, 0.30, 1.0 - flatN.y);
@@ -224,6 +240,7 @@ function makeWaterMaterial({ amp, shore, facet = 1 }) {
         uTaperHalf: { value: WATER_HALF },
         uShore: { value: shore },
         uFacet: { value: facet },
+        uSkyFloor: { value: 0.12 },
         uCamPos: { value: new THREE.Vector3() },
         uSunDir: { value: new THREE.Vector3(-180, 320, 160).normalize() },
         uSunCol: { value: new THREE.Color(0xffffff) },
@@ -336,6 +353,8 @@ export class Renderer3D {
     this.loadLlama();
     this.loadBoat();
     this.loadSeaLife();
+
+    this.waveAt = waveAt;   // exposed for the float/dryness checks
 
     this.fx = document.getElementById('fx');
     this.progress = document.getElementById('progress');

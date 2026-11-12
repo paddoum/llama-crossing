@@ -158,26 +158,27 @@ The 2D build still draws its llama in code -- a GLB has nothing to render on a 2
 
 ## Water
 
-The surface is a custom `ShaderMaterial` in `js/render3d.js`. Four **Gerstner** waves are summed in the vertex shader and the normal comes from their analytic gradient, so there is no CPU work per frame and no vertex buffer upload. The waves are anchored to world space, so the sheet can follow the camera without the surface swimming, and its amplitude tapers at the rim to meet the flat far-field plane invisibly.
+The surface is a custom `ShaderMaterial` in `js/render3d.js`, flat-shaded so the sea is faceted like the rest of the scene.
 
-The fragment shader adds a depth-tinted base, sun glitter, a sky-coloured fresnel at grazing angles (what reads as "wet"), foam on the crests, and foam along both banks computed from the level's own meander — the same `meanderAmp` / `meanderLen` / `riverWidth` the gameplay uses, passed in as uniforms. It uses three's own fog and colour-space chunks so it matches the rest of the scene exactly.
+**The wave function comes from the Argonaut United app's own home screen** (`src/components/shader/shaders/bluestorm.frag`), which adapts [afl_ext's "Ocean"](https://www.shadertoy.com/view/MdXyzX) (MIT). The app raymarches a fullscreen ocean with a fixed camera and no geometry -- that cannot host a boat, sharks and buoys at correct depths, so what is reused here is the wave *function*, not the raymarcher: `exp(sin(x) - 1)` summed over octaves, each octave dragging the sample point along its own direction.
 
-### Why Gerstner, and what was deliberately left out
+That shape is the whole point. It gives **sharp crests over broad flat troughs**, and flat troughs are what a faceted surface needs -- with gentle sine swell, neighbouring facets tilt so little they shade almost identically and the faceting is invisible. Measured as facet-edge contrast (p90) when shading switches smooth to flat:
 
-Gerstner (Tardif's [Water Walkthrough](https://alextardif.com/Water.html), from GPU Gems ch.1) costs the same as a sine sum — no textures, no extra passes — but its horizontal displacement pinches the crests and flattens the troughs. That is what makes the flat-shaded facets read: with plain sines, neighbouring facets tilt so little that they shade almost identically. Measured, switching the shading from smooth to flat moves the facet-edge p90 from **62 to 102**; before Gerstner the same A/B was within noise.
+| Wave shape | smooth | faceted |
+|---|---|---|
+| Four sines | 62 | 62 (within noise) |
+| Gerstner | 62 | 102 |
+| `exp(sin(x)-1)` octaves, as the app | 29 | 65 |
 
-From those references the following were **rejected on purpose**, not overlooked:
+The app's **sky-reflection floor** is reused too: fresnel alone leaves head-on water nearly reflection-free and flat, so the reflection is lifted to a minimum fraction (`uSkyFloor`).
 
-- **Screen-space reflection** — Tardif calls it "really expensive" with little benefit on turbulent water, and his scene costs ~0.9 ms on an RTX 2080.
-- **Depth-buffer shoreline softening and refraction** — needs the scene depth texture; [Azur Games](https://azurgames.com/blog/realistic-water-in-midcore-games-balancing-fps-and-visual-appeal/) say mobile titles avoid exactly this and paint masks instead. The channel-edge foam here is analytic and free.
-- **Normal maps and flow maps** — Azur measured 4–6 fps back from dropping normal maps alone, and their mobile budget is "a few Gerstner cycles, 30–40 tris per water chunk, 3–4 textures."
-- **Tessellation** — not in WebGL2.
+Rejected on purpose, from the references: screen-space reflection (Tardif calls it "really expensive" for little gain on turbulent water -- his scene is ~0.9 ms on an RTX 2080), depth-buffer shorelines and refraction (Azur Games say mobile titles avoid exactly this), normal and flow maps (they measured 4-6 fps back from dropping normal maps alone), and tessellation (absent from WebGL2).
 
 ### Facet size is coupled to the hull
 
-`WATER_SEG` sets the facet size, and it is **not** a free visual knob: coarser water triangles interpolate across the troughs, so the rendered surface sits higher than the wave field the boat floats on, and the hull can take water. If you change it, re-check `BOAT_Y` with the analytic test — compare the hull floor against `waveAt()` sampled along the hull. Do **not** trust a pixel probe for this: probing "is there blue inside the hull" reads water *past* the bow and stern as flooding, and reports the same number however high the boat sits.
+`WATER_SEG` sets the facet size and is **not** a free visual knob: coarser triangles interpolate across the troughs, so the rendered surface sits higher than the wave field the boat floats on. After changing it, re-check with the analytic float test -- compare the hull floor against `__r3d.waveAt()` sampled along the hull. Do **not** trust a pixel probe here: "is there blue inside the hull" reads water seen *past* the bow and stern as flooding, and returns the same number however high the boat sits. That mistake once left the boat hovering 4.7 units above the sea.
 
-`WAVES` in `js/render3d.js` is the single definition of the wave set: it generates the GLSL **and** the JS `waveAt()` that floats the boat, the spit and the foam particles. Edit it in one place and both stay in sync.
+`WAVE` in `js/render3d.js` is the single definition of the wave set: the GLSL is generated from it and the JS `waveAt()` mirrors it (fewer octaves -- the boat only needs the broad swell).
 
 ## Verifying the 3D build
 
