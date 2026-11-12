@@ -69,7 +69,7 @@ const hash = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - M
 // plane for the far field. Waves are anchored to world space, so nothing
 // swims when the sheet moves, and the sheet's amplitude tapers at its rim so
 // it meets the far plane invisibly.
-const WATER_SIZE = 1800, WATER_SEG = 60, WATER_HALF = WATER_SIZE / 2;
+const WATER_SIZE = 1800, WATER_SEG = 110, WATER_HALF = WATER_SIZE / 2;
 
 // Wave shape taken from the Argonaut United app's own home-screen ocean
 // (src/components/shader/shaders/bluestorm.frag), which adapts afl_ext's
@@ -174,7 +174,7 @@ void main() {
 
 const WATER_FRAG = `
 #include <fog_pars_fragment>
-uniform vec3 uSunDir, uSunCol, uSkyCol, uGroundCol, uShallow, uDeep, uFoam, uCamPos;
+uniform vec3 uSunDir, uSunCol, uSkyCol, uSkyTop, uSkyLow, uGroundCol, uShallow, uDeep, uFoam, uCamPos;
 uniform float uTime, uMeanderAmp, uMeanderLen, uHalfWidth, uShore, uFacet, uSkyFloor;
 varying vec3 vWorld;
 varying float vCrest;
@@ -182,6 +182,21 @@ varying float vCrest;
 // Constant across a triangle, because it is derived from the facet normal.
 float facetNoise(vec3 n) {
   return fract(sin(dot(n.xz, vec2(12.9898, 78.233)) * 431.7) * 43758.5453);
+}
+
+// What a reflected ray sees. The app looks its reflection up in the real
+// screen-space sky; there is no such buffer here, so this is the same idea
+// built procedurally: a gradient, a sun with a halo, and a glowing band along
+// the horizon. Without this the water only ever mixes toward one flat colour,
+// which is why it had no reflections to speak of.
+vec3 skySample(vec3 dir) {
+  float up = clamp(dir.y, 0.0, 1.0);
+  vec3 col = mix(uSkyLow, uSkyTop, pow(up, 0.55));
+  float s = max(dot(dir, uSunDir), 0.0);
+  col += uSunCol * pow(s, 600.0) * 3.0;            // tight core: the glint
+  col += uSunCol * pow(s, 60.0) * 0.18;            // halo around it
+  col += uSunCol * exp(-abs(dir.y) * 16.0) * 0.10; // band along the horizon
+  return col;
 }
 
 void main() {
@@ -200,26 +215,20 @@ void main() {
   base *= 0.90 + facetNoise(flatN) * 0.24;
 
   vec3 col = base * (ambient * 0.78 + uSunCol * diff * 0.45);
+  // Broad highlight. Tighter than this and a faceted surface almost never
+  // satisfies it, so the sparkle vanished.
   vec3 Hv = normalize(uSunDir + V);
-  col += uSunCol * pow(max(dot(N, Hv), 0.0), 110.0) * 1.6;
+  col += uSunCol * pow(max(dot(N, Hv), 0.0), 140.0) * 0.55;
 
-  // The app lifts the sky reflection to a floor, because fresnel alone leaves
-  // head-on water almost reflection-free and flat. Same trick here.
+  // Reflect the sky properly: each facet looks in its own direction, so the
+  // sun and the horizon band break up across the water instead of the whole
+  // surface drifting toward one colour. The app lifts this to a floor because
+  // fresnel alone leaves head-on water flat; same here.
+  vec3 R = reflect(-V, N);
+  R.y = abs(R.y);
   float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
   float skyAmount = uSkyFloor + (1.0 - uSkyFloor) * fres;
-  col = mix(col, uSkyCol, skyAmount * 0.45);
-
-  // Foam from crest height and from how steeply the facet tilts. Stepped, so
-  // it lands on whole facets as whitecaps rather than fading across them.
-  float crest = smoothstep(1.4, 3.1, vCrest + facetNoise(flatN) * 0.7);
-  float tilt = smoothstep(0.10, 0.30, 1.0 - flatN.y);
-  col = mix(col, uFoam, floor(max(crest, tilt) * 3.0) / 3.0 * 0.5);
-
-  // Foam along both edges of the channel, following the level's meander.
-  float centre = uMeanderAmp * sin((-vWorld.z) / uMeanderLen * 6.2831853);
-  float edge = abs(abs(vWorld.x - centre) - uHalfWidth);
-  float wobble = sin(vWorld.z * 0.21 + uTime * 1.7) * 2.6 + sin(vWorld.z * 0.07 - uTime * 0.9) * 2.0;
-  col = mix(col, uFoam, (1.0 - smoothstep(0.0, 15.0, edge + wobble)) * uShore);
+  col = mix(col, skySample(R), skyAmount * 0.45);
 
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
@@ -242,9 +251,16 @@ function makeWaterMaterial({ amp, shore, facet = 1 }) {
         uFacet: { value: facet },
         uSkyFloor: { value: 0.12 },
         uCamPos: { value: new THREE.Vector3() },
-        uSunDir: { value: new THREE.Vector3(-180, 320, 160).normalize() },
+        // Deliberately NOT the scene's sun. That one sits behind the camera,
+        // which lights the boat and the llama nicely but reflects its glint
+        // away from the viewer. The water gets its own direction, ahead and
+        // up, so the glitter path falls between the boat and the horizon
+        // where it can actually be seen. Stylised, not physical.
+        uSunDir: { value: new THREE.Vector3(-150, 280, -300).normalize() },
         uSunCol: { value: new THREE.Color(0xffffff) },
-        uSkyCol: { value: new THREE.Color(0x4a9fd0) },
+        uSkyCol: { value: new THREE.Color(SKY) },
+        uSkyTop: { value: new THREE.Color(0x05203c) },
+        uSkyLow: { value: new THREE.Color(0x15557f) },
         uGroundCol: { value: new THREE.Color(0x02122a) },
         uShallow: { value: new THREE.Color(COL.seaShallow) },
         uDeep: { value: new THREE.Color(COL.seaDeep) },
@@ -709,7 +725,7 @@ export class Renderer3D {
     const level = session.level;
     const g = new THREE.Group();
 
-    g.add(buildDistantLand(level, -340, level.length + 420));
+    g.add(buildIslands(level, -340, level.length + 420));
     g.add(buildBuoys(level, -120, level.length - 40, 185, this));
     g.add(buildStart(level));
     g.add(buildDock(level));
@@ -726,7 +742,7 @@ export class Renderer3D {
           swimmer.scale.setScalar(o.hl * SEA_LIFE.whale.perUnit);
           swimmer.rotation.y = SEA_LIFE.whale.yaw;
           mesh.add(swimmer);
-          mesh.position.y = 1.5;
+          mesh.position.y = -o.r * 0.8;   // down into the water, back showing
         } else {
           mesh = makeWhale(o);
         }
@@ -946,31 +962,28 @@ function meshFrom(verts, material) {
   return new THREE.Mesh(g, material);
 }
 
-// Low land far out on both beams. It never meets the course -- it is there so
-// the eye has something to measure speed against, which bare water does not
-// give you.
-function buildDistantLand(level, yFrom, yTo, step = 90) {
-  const near = [], far = [];
-  const IN = 520, OUT = 1600;
-  let prev = null;
+// A few islands far out on both beams, instead of a continuous coastline.
+// They are there so the eye has something to measure speed against, which
+// bare water does not give you; everything is welded into one mesh.
+function buildIslands(level, yFrom, yTo, step = 850) {
+  const w = Welder();
+  const cone = (r, h, seg) => new THREE.ConeGeometry(r, h, seg);
   for (let y = yFrom; y <= yTo; y += step) {
-    const c = riverCenter(level, y) - HALF;
-    const h = 10 + Math.abs(Math.sin(y * 0.0031)) * 26;      // a rolling coastline
-    const cur = { z: -y, c, h };
-    if (prev) {
-      for (const side of [-1, 1]) {
-        const pi = prev.c + side * IN, ci = cur.c + side * IN;
-        const po = prev.c + side * OUT, co = cur.c + side * OUT;
-        quad(near, [pi, 0, prev.z], [pi, prev.h, prev.z], [ci, cur.h, cur.z], [ci, 0, cur.z]);
-        quad(far, [pi, prev.h, prev.z], [po, prev.h * 0.5, prev.z], [co, cur.h * 0.5, cur.z], [ci, cur.h, cur.z]);
-      }
+    for (const side of [-1, 1]) {
+      const seed = y * 0.013 + (side > 0 ? 3.7 : 9.1);
+      const h = hash(seed);
+      if (h < 0.3) continue;                        // leave gaps between them
+      const cx = riverCenter(level, y) - HALF + side * (540 + h * 780);
+      const cz = -(y + hash(seed + 5.3) * step * 0.7);
+      const r = 95 + h * 150;
+      const height = 20 + hash(seed + 1.9) * 52;
+      w.add(cone(r, height, 7), [cx, height * 0.5 - 6, cz]);
+      // a smaller peak alongside, so the silhouette is not a plain cone
+      const r2 = r * (0.4 + hash(seed + 2.7) * 0.25);
+      w.add(cone(r2, height * 1.45, 6), [cx + r * 0.42, height * 0.72 - 6, cz + r * 0.3]);
     }
-    prev = cur;
   }
-  const g = new THREE.Group();
-  g.add(meshFrom(near, M.landHigh));
-  g.add(meshFrom(far, M.land));
-  return g;
+  return w.empty() ? new THREE.Group() : w.mesh(M.land);
 }
 
 // One buoy, built once and instanced: float, topmark and a short mast.
@@ -1404,7 +1417,7 @@ const MENU_RIVER = { riverWidth: 260, meanderAmp: 22, meanderLen: 760, speed: 11
 function buildMenuSea(renderer = null) {
   const level = MENU_RIVER;
   const g = new THREE.Group();
-  g.add(buildDistantLand(level, -700, 1500));
+  g.add(buildIslands(level, -700, 1500));
   g.add(buildBuoys(level, -600, 1400, 185, renderer));
   return g;
 }

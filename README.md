@@ -172,6 +172,17 @@ That shape is the whole point. It gives **sharp crests over broad flat troughs**
 
 The app's **sky-reflection floor** is reused too: fresnel alone leaves head-on water nearly reflection-free and flat, so the reflection is lifted to a minimum fraction (`uSkyFloor`).
 
+### Reflections
+
+Each facet reflects a procedurally sampled sky (`skySample`) — gradient, sun core, halo, horizon band — rather than mixing toward one flat colour, which is what makes the sun break up across the water as a glitter path. The app does the same thing by looking its reflection up in the real screen-space sky; there is no such buffer here.
+
+Two values are load-bearing and easy to get wrong:
+
+- **The water's sun is not the scene's sun.** The scene light sits behind the camera, which lights the boat and llama well but reflects its glint *away* from the viewer — no amount of shader work makes a glint appear from there. `uSunDir` therefore points ahead and up, so the glitter path falls between the boat and the horizon. Stylised, not physical.
+- **The specular exponent must stay tight** (140). Widening it to make glints easier to hit turns whole facets white — measured, that pushed the water's median luminance from 72 to 144 and covered the sea in pale sheets. Sparkle comes from a tight exponent over many facets, not a broad one.
+
+There is deliberately **no foam**: whitecaps and the channel-edge foam were both carried over from the river, and on open water with buoys marking the course there is no shore for either to belong to.
+
 Rejected on purpose, from the references: screen-space reflection (Tardif calls it "really expensive" for little gain on turbulent water -- his scene is ~0.9 ms on an RTX 2080), depth-buffer shorelines and refraction (Azur Games say mobile titles avoid exactly this), normal and flow maps (they measured 4-6 fps back from dropping normal maps alone), and tessellation (absent from WebGL2).
 
 ### Facet size is coupled to the hull
