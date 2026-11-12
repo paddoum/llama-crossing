@@ -2,32 +2,42 @@
 // World -> scene: X = x - 180 (across the river), Y = up, Z = -y (downriver is +Z).
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { LOGICAL_W, riverBounds } from './levels.js';
+import { LOGICAL_W, riverBounds, riverCenter } from './levels.js';
 
 const HALF = LOGICAL_W / 2;
-const SKY = 0x9ed9f3;
+const SKY = 0x1884c6;   // azure: the brand's lightest blue, so the horizon still reads
 
+// Argonaut United palette, read from the app's own tokens (src/style.css):
+// navy #021a3b, surface #0e2549, page #153756, tab-bar #153d68,
+// azure #1884c6, deep-cyan #058cac, cyan #22bae7, gold #c8980a, magenta #ac2caf.
 const COL = {
-  water: 0x2f86c6, grass: 0x6cc04a, grassDark: 0x4f9c37, sand: 0xe8d38a,
-  rock: 0x7d8791, log: 0x8b5a2b, logLight: 0xa7713a, logDark: 0x5f3a17,
+  navy: 0x021a3b, surface: 0x0e2549, page: 0x153756, tabBar: 0x153d68,
+  azure: 0x1884c6, deepCyan: 0x058cac, cyan: 0x22bae7,
+  gold: 0xc8980a, magenta: 0xac2caf, white: 0xffffff,
+
+  seaDeep: 0x021a3b, seaShallow: 0x07557a, foam: 0xbfe9f7,
+  land: 0x12365c, landHigh: 0x1b4a76,
+  reef: 0x16436b, reefLight: 0x2b668f,
+  shark: 0x1884c6, sharkBelly: 0xdbeef8,
+  whale: 0x3d7ba6, whaleBelly: 0xdceef7,
   hull: 0xa35f2a, hullDark: 0x6e3d15, deck: 0xc98a4b, mast: 0x8a6136,
   wool: 0xf2e6cf, skin: 0xe9d9bc, pink: 0xe8a9a3, ink: 0x2a2420,
   blanketA: 0xc0392b, blanketB: 0x1f6f8b, scarf: 0xe2453b,
-  virus: 0xe0479e, virusDark: 0x9c2a68, virusCore: 0xffd3ec, spit: 0xeaffd0,
-  swirl: 0x0d2b52, white: 0xffffff, dark: 0x1a1a1a,
-  waterFar: 0x2f86c6,
+  spit: 0xeaffd0, swirl: 0x021a3b, dark: 0x061527,
 };
 
 const mat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
 
 // Shared materials: never disposed, so level teardown only frees geometry.
 const M = {
-  grass: mat(COL.grass, { side: THREE.DoubleSide }),
-  sand: mat(COL.sand, { side: THREE.DoubleSide }),
-  rock: mat(COL.rock),
-  log: mat(COL.log),
-  logLight: mat(COL.logLight),
-  logDark: mat(COL.logDark),
+  land: mat(COL.land, { side: THREE.DoubleSide }),
+  landHigh: mat(COL.landHigh, { side: THREE.DoubleSide }),
+  reef: mat(COL.reef),
+  reefLight: mat(COL.reefLight),
+  whale: mat(COL.whale),
+  whaleBelly: mat(COL.whaleBelly),
+  shark: mat(COL.shark, { emissive: 0x0d3a5c }),
+  sharkBelly: mat(COL.sharkBelly),
   hull: mat(COL.hull),
   hullDark: mat(COL.hullDark),
   deck: mat(COL.deck),
@@ -40,14 +50,14 @@ const M = {
   white: mat(COL.white, { side: THREE.DoubleSide }),
   scarf: mat(COL.scarf),
   ink: mat(COL.ink),
-  virus: mat(COL.virus),
-  virusDark: mat(COL.virusDark),
-  virusCore: mat(COL.virusCore),
   spit: mat(COL.spit),
   swirl: mat(COL.swirl, { side: THREE.DoubleSide }),
   dark: mat(COL.dark),
-  foliage: mat(COL.grassDark),
-  foliageLight: mat(0x5fb444),
+  buoyPort: mat(COL.magenta),
+  buoyStbd: mat(COL.gold),
+  buoyMast: mat(COL.white),
+  deckPlate: mat(COL.surface),
+  deckEdge: mat(COL.tabBar),
 };
 
 // Deterministic jitter, same trick the 2D renderer uses.
@@ -135,10 +145,10 @@ void main() {
   col += uSunCol * pow(max(dot(N, H), 0.0), 110.0) * 1.6;
 
   // Grazing angles pick up the sky, which is what reads as "wet".
-  col = mix(col, uSkyCol, pow(1.0 - max(dot(N, V), 0.0), 4.0) * 0.5);
+  col = mix(col, uSkyCol, pow(1.0 - max(dot(N, V), 0.0), 4.0) * 0.30);
 
   // Foam on the crests.
-  col = mix(col, uFoam, smoothstep(1.6, 3.0, vCrest) * 0.55);
+  col = mix(col, uFoam, smoothstep(1.6, 3.0, vCrest) * 0.42);
 
   // Foam along both banks, following the level's meander.
   float centre = uMeanderAmp * sin((-vWorld.z) / uMeanderLen * 6.2831853);
@@ -165,11 +175,11 @@ function makeWaterMaterial({ amp, shore }) {
         uCamPos: { value: new THREE.Vector3() },
         uSunDir: { value: new THREE.Vector3(-180, 320, 160).normalize() },
         uSunCol: { value: new THREE.Color(0xffffff) },
-        uSkyCol: { value: new THREE.Color(0xdff3ff) },
-        uGroundCol: { value: new THREE.Color(0x3f6a8a) },
-        uShallow: { value: new THREE.Color(0x4fa3d8) },
-        uDeep: { value: new THREE.Color(0x1f5f92) },
-        uFoam: { value: new THREE.Color(0xeaf6ff) },
+        uSkyCol: { value: new THREE.Color(0x4a9fd0) },
+        uGroundCol: { value: new THREE.Color(0x02122a) },
+        uShallow: { value: new THREE.Color(COL.seaShallow) },
+        uDeep: { value: new THREE.Color(COL.seaDeep) },
+        uFoam: { value: new THREE.Color(COL.foam) },
         uMeanderAmp: { value: 0 },
         uMeanderLen: { value: 900 },
         uHalfWidth: { value: 130 },
@@ -232,7 +242,7 @@ export class Renderer3D {
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 1, 2600);
     this.camera.position.set(0, CAM_UP, CAM_BACK);
 
-    this.scene.add(new THREE.HemisphereLight(0xdff3ff, 0x4f7a34, 1.05));
+    this.scene.add(new THREE.HemisphereLight(0xcdeaff, 0x0a2744, 1.05));
     const sun = new THREE.DirectionalLight(0xffffff, 1.25);
     sun.position.set(-180, 320, 160);
     this.scene.add(sun);
@@ -246,14 +256,14 @@ export class Renderer3D {
     this.particles = this.makeParticles();
     this.scene.add(this.particles);
 
-    this.menuGroup = buildMenuRiver();
+    this.menuGroup = buildMenuSea();
     this.scene.add(this.menuGroup);
 
     this.levelGroup = null;
     this.session = null;
-    this.logMeshes = [];
+    this.whaleMeshes = [];
     this.swirlMeshes = [];
-    this.virusMeshes = [];
+    this.sharkMeshes = [];
     this.spitPool = [];
     this.lastT = 0;
     this.camLook = new THREE.Vector3(0, 0, -LOOK_AHEAD);
@@ -495,24 +505,25 @@ export class Renderer3D {
     geo.setDrawRange(0, max);
   }
 
-  updateViruses(session, t) {
-    if (!this.virusMeshes.length) return;
+  updateSharks(session, t) {
+    if (!this.sharkMeshes.length) return;
     const m = this._m4 || (this._m4 = new THREE.Matrix4());
     const q = this._q || (this._q = new THREE.Quaternion());
     const e = this._e || (this._e = new THREE.Euler());
     const p = this._v3 || (this._v3 = new THREE.Vector3());
     const one = this._one || (this._one = new THREE.Vector3(1, 1, 1));
     const zero = this._zero || (this._zero = new THREE.Vector3(0, 0, 0));
-    session.viruses.forEach((v, i) => {
+    session.sharks.forEach((v, i) => {
       if (v.dead) {
         m.compose(p.set(0, -9999, 0), q.identity(), zero);
       } else {
-        e.set(v.spin * 0.6, v.spin, v.spin * 0.3);
-        m.compose(p.set(v.x - HALF, 11 + Math.sin(t * 2.4 + v.phase) * 2.2, -v.y), q.setFromEuler(e), one);
+        // Nosing left and right across the channel, with a little roll.
+        e.set(Math.sin(t * 1.6 + v.phase) * 0.08, Math.sin(t * 0.9 + v.phase) * 0.5, Math.sin(t * 1.3 + v.phase) * 0.12);
+        m.compose(p.set(v.x - HALF, 1.5 + Math.sin(t * 2.1 + v.phase) * 1.2, -v.y), q.setFromEuler(e), one);
       }
-      for (const mesh of this.virusMeshes) mesh.setMatrixAt(i, m);
+      for (const mesh of this.sharkMeshes) mesh.setMatrixAt(i, m);
     });
-    for (const mesh of this.virusMeshes) mesh.instanceMatrix.needsUpdate = true;
+    for (const mesh of this.sharkMeshes) mesh.instanceMatrix.needsUpdate = true;
   }
 
   // Spit is pooled: a handful of blobs reused for the whole run.
@@ -541,24 +552,24 @@ export class Renderer3D {
     const level = session.level;
     const g = new THREE.Group();
 
-    g.add(buildBanks(level, -340, level.length + 420));
-    g.add(buildProps(level, -300, level.length + 380));
-    g.add(buildBeach(level));
+    g.add(buildDistantLand(level, -340, level.length + 420));
+    g.add(buildBuoys(level, -120, level.length - 40));
+    g.add(buildStart(level));
     g.add(buildDock(level));
 
-    this.logMeshes = [];
+    this.whaleMeshes = [];
     this.swirlMeshes = [];
     for (const o of session.obstacles) {
       let mesh;
       if (o.type === 'rock') mesh = makeRock(o);
-      else if (o.type === 'log') { mesh = makeLog(o); this.logMeshes.push({ o, mesh }); }
+      else if (o.type === 'whale') { mesh = makeWhale(o); this.whaleMeshes.push({ o, mesh }); }
       else { mesh = makeWhirlpool(o); this.swirlMeshes.push({ o, mesh }); }
       mesh.position.set(o.x - HALF, mesh.position.y, -o.y);
       g.add(mesh);
     }
 
-    this.virusMeshes = session.viruses.length ? buildViruses(session.viruses.length) : [];
-    for (const m of this.virusMeshes) g.add(m);
+    this.sharkMeshes = session.sharks.length ? buildSharks(session.sharks.length) : [];
+    for (const m of this.sharkMeshes) g.add(m);
 
     this.scene.add(g);
     this.levelGroup = g;
@@ -599,12 +610,15 @@ export class Renderer3D {
     this.boat.visible = !(b.invuln > 0 && Math.floor(t * 14) % 2 === 0);
     this.boat.userData.rig(t, session.status === 'won', b.lean);
 
-    for (const { o, mesh } of this.logMeshes) mesh.position.x = o.x - HALF;
+    for (const { o, mesh } of this.whaleMeshes) {
+      mesh.position.x = o.x - HALF;
+      mesh.rotation.y = o.vx < 0 ? Math.PI : 0;   // flukes trail the direction of travel
+    }
     for (const { o, mesh } of this.swirlMeshes) {
       mesh.rotation.y = -o.spin;
       mesh.children[0].rotation.y = o.spin * 1.7;
     }
-    this.updateViruses(session, t);
+    this.updateSharks(session, t);
     this.updateSpits(session, t);
 
     this.updateParticles(session, t);
@@ -734,81 +748,79 @@ function meshFrom(verts, material) {
   return new THREE.Mesh(g, material);
 }
 
-// Banks follow the level's meander: a sand lip at the water line, grass beyond.
-function buildBanks(level, yFrom, yTo, step = 26) {
-  const sand = [], grass = [];
-  const OUT = 900;
+// Low land far out on both beams. It never meets the course -- it is there so
+// the eye has something to measure speed against, which bare water does not
+// give you.
+function buildDistantLand(level, yFrom, yTo, step = 90) {
+  const near = [], far = [];
+  const IN = 520, OUT = 1600;
   let prev = null;
   for (let y = yFrom; y <= yTo; y += step) {
-    const b = riverBounds(level, y);
-    const cur = { z: -y, L: b.left - HALF, R: b.right - HALF };
+    const c = riverCenter(level, y) - HALF;
+    const h = 10 + Math.abs(Math.sin(y * 0.0031)) * 26;      // a rolling coastline
+    const cur = { z: -y, c, h };
     if (prev) {
-      quad(sand,
-        [prev.L, 0.4, prev.z], [prev.L - 16, 5, prev.z], [cur.L - 16, 5, cur.z], [cur.L, 0.4, cur.z]);
-      quad(grass,
-        [prev.L - 16, 5, prev.z], [prev.L - OUT, 9, prev.z], [cur.L - OUT, 9, cur.z], [cur.L - 16, 5, cur.z]);
-      quad(sand,
-        [prev.R, 0.4, prev.z], [cur.R, 0.4, cur.z], [cur.R + 16, 5, cur.z], [prev.R + 16, 5, prev.z]);
-      quad(grass,
-        [prev.R + 16, 5, prev.z], [cur.R + 16, 5, cur.z], [cur.R + OUT, 9, cur.z], [prev.R + OUT, 9, prev.z]);
+      for (const side of [-1, 1]) {
+        const pi = prev.c + side * IN, ci = cur.c + side * IN;
+        const po = prev.c + side * OUT, co = cur.c + side * OUT;
+        quad(near, [pi, 0, prev.z], [pi, prev.h, prev.z], [ci, cur.h, cur.z], [ci, 0, cur.z]);
+        quad(far, [pi, prev.h, prev.z], [po, prev.h * 0.5, prev.z], [co, cur.h * 0.5, cur.z], [ci, cur.h, cur.z]);
+      }
     }
     prev = cur;
   }
   const g = new THREE.Group();
-  g.add(meshFrom(sand, M.sand));
-  g.add(meshFrom(grass, M.grass));
+  g.add(meshFrom(near, M.landHigh));
+  g.add(meshFrom(far, M.land));
   return g;
 }
 
-// Trees and bushes, instanced and placed from the same hash as the 2D art.
-function buildProps(level, yFrom, yTo, step = 46) {
+// One buoy, built once and instanced: float, topmark and a short mast.
+function buoyGeometry() {
+  const w = Welder();
+  w.add(new THREE.CylinderGeometry(5.5, 4, 13, 7), [0, 2, 0]);
+  w.add(new THREE.ConeGeometry(5.5, 9, 7), [0, 12, 0]);
+  w.add(new THREE.CylinderGeometry(0.9, 0.9, 13, 5), [0, 22, 0]);
+  w.add(new THREE.SphereGeometry(3, 7, 5), [0, 29, 0]);
+  return w.geo();
+}
+
+// The buoys are the course: they stand where the banks used to, so the channel
+// the boat is clamped to is the one the player can see.
+function buildBuoys(level, yFrom, yTo, step = 115) {
   const slots = [];
   for (let y = yFrom; y <= yTo; y += step) {
     const b = riverBounds(level, y);
-    for (const side of [-1, 1]) {
-      const h1 = hash(y * (side > 0 ? 1.7 : 2.3));
-      if (h1 < 0.22) continue;
-      const edge = side < 0 ? b.left - HALF - 16 : b.right - HALF + 16;
-      const out = 24 + h1 * 330;
-      slots.push({
-        x: edge + side * out,
-        z: -(y + hash(y + side) * step),
-        s: 7 + hash(y * 3.1 + side) * 9,
-        tree: hash(y * 5.7 + side) > 0.45,
-      });
-    }
+    slots.push({ x: b.left - HALF - 6, z: -y, side: -1 });
+    slots.push({ x: b.right - HALF + 6, z: -y, side: 1 });
   }
-  const group = new THREE.Group();
-  const trees = slots.filter((s) => s.tree), bushes = slots.filter((s) => !s.tree);
-
-  if (trees.length) {
-    const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.1, 1.6, 1, 5), M.logDark, trees.length);
-    const crown = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 6), M.foliage, trees.length);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion();
-    trees.forEach((s, i) => {
-      m.compose(new THREE.Vector3(s.x, 8 + s.s * 0.5, s.z), q, new THREE.Vector3(1, s.s, 1));
-      trunk.setMatrixAt(i, m);
-      m.compose(new THREE.Vector3(s.x, 8 + s.s * 1.6, s.z), q, new THREE.Vector3(s.s * 0.95, s.s * 2.1, s.s * 0.95));
-      crown.setMatrixAt(i, m);
+  const geo = buoyGeometry();
+  const g = new THREE.Group();
+  for (const side of [-1, 1]) {
+    const mine = slots.filter((p) => p.side === side);
+    if (!mine.length) continue;
+    const mesh = new THREE.InstancedMesh(geo, side < 0 ? M.buoyPort : M.buoyStbd, mine.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
+    mine.forEach((p, i) => {
+      m.compose(new THREE.Vector3(p.x, -3, p.z), q, one);
+      mesh.setMatrixAt(i, m);
     });
-    group.add(trunk, crown);
+    mesh.frustumCulled = false;
+    g.add(mesh);
   }
-  if (bushes.length) {
-    const bush = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), M.foliageLight, bushes.length);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion();
-    bushes.forEach((s, i) => {
-      m.compose(new THREE.Vector3(s.x, 8 + s.s * 0.35, s.z), q, new THREE.Vector3(s.s * 0.8, s.s * 0.6, s.s * 0.8));
-      bush.setMatrixAt(i, m);
-    });
-    group.add(bush);
-  }
-  return group;
+  return g;
 }
 
-function buildBeach(level) {
+// Pontoon the crossing starts from.
+function buildStart(level) {
   const b = riverBounds(level, 0);
-  const g = new THREE.Mesh(new THREE.BoxGeometry(b.right - b.left + 60, 6, 240), M.sand);
-  g.position.set(b.center - HALF, 2, 122);
+  const g = new THREE.Group();
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(b.right - b.left + 70, 9, 120), M.deckPlate);
+  deck.position.set(b.center - HALF, 5, 62);
+  g.add(deck);
+  const edge = new THREE.Mesh(new THREE.BoxGeometry(b.right - b.left + 78, 3, 128), M.deckEdge);
+  edge.position.set(b.center - HALF, 10, 62);
+  g.add(edge);
   return g;
 }
 
@@ -818,16 +830,17 @@ function buildDock(level) {
   const w = b.right - b.left, cx = b.center - HALF;
   const g = new THREE.Group();
 
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(w + 44, 8, 34), M.log);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(w + 44, 8, 34), M.deckPlate);
   deck.position.set(cx, 11, z - 19);
   g.add(deck);
 
   const planks = Welder();
   const plankGeo = new THREE.BoxGeometry(11, 2, 32);
   for (let x = -(w + 44) / 2 + 6; x < (w + 44) / 2; x += 15) planks.add(plankGeo, [cx + x, 15.4, z - 19]);
-  g.add(planks.mesh(M.logLight));
+  g.add(planks.mesh(M.deckEdge));
+
   for (const px of [b.left - HALF + 6, cx, b.right - HALF - 6]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 22, 6), M.logDark);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 22, 6), M.dark);
     post.position.set(px, 2, z - 3);
     g.add(post);
   }
@@ -839,20 +852,21 @@ function buildDock(level) {
   }
   if (!pale.empty()) g.add(pale.mesh(M.white));
   if (!ink.empty()) g.add(ink.mesh(M.dark));
-  // B flag
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 54, 6), M.white);
+  // finish flag
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 54, 6), M.buoyMast);
   pole.position.set(cx, 42, z - 30);
   g.add(pole);
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(30, 17), M.scarf);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(30, 17), mat(COL.cyan, { side: THREE.DoubleSide }));
   flag.position.set(cx + 16, 60, z - 30);
   g.add(flag);
-  // grass apron so the far shore reads as land behind the dock
-  const apron = new THREE.Mesh(new THREE.BoxGeometry(w + 1200, 10, 500), M.grass);
-  apron.position.set(cx, 5, z - 286);
+  // harbour apron behind the line
+  const apron = new THREE.Mesh(new THREE.BoxGeometry(w + 900, 12, 420), M.landHigh);
+  apron.position.set(cx, 6, z - 246);
   g.add(apron);
   return g;
 }
 
+// Reef, not a river rock: same jagged lump, sea colours.
 function makeRock(o) {
   const g = new THREE.IcosahedronGeometry(o.r * 1.15, 0);
   const p = g.attributes.position.array;
@@ -861,22 +875,29 @@ function makeRock(o) {
     p[i] *= 0.75 + j * 0.5; p[i + 1] *= 0.6 + j * 0.4; p[i + 2] *= 0.75 + j * 0.5;
   }
   g.computeVertexNormals();
-  const m = new THREE.Mesh(g, M.rock);
+  const m = new THREE.Mesh(g, M.reef);
   m.position.y = -o.r * 0.25;
   return m;
 }
 
-function makeLog(o) {
+// Whale: a long back at the surface with a dorsal fin and flukes. It lies
+// across the channel and swims the way it is drifting (see the yaw in
+// renderSession), so the flukes always trail.
+function makeWhale(o) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(o.r, o.r, o.hl * 2, 8), M.log);
-  body.rotation.z = Math.PI / 2;
-  g.add(body);
-  for (const s of [-1, 1]) {
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(o.r * 0.92, o.r * 0.92, 1.4, 8), M.logLight);
-    cap.rotation.z = Math.PI / 2;
-    cap.position.x = s * (o.hl + 0.7);
-    g.add(cap);
+  const dark = Welder();
+  dark.add(new THREE.SphereGeometry(1, 12, 9), [0, 0, 0], [o.hl, o.r * 1.05, o.r * 1.25]);
+  dark.add(new THREE.SphereGeometry(o.r * 0.85, 9, 7), [o.hl * 0.82, 0, 0], [1.25, 0.85, 0.95]);
+  dark.add(new THREE.ConeGeometry(o.r * 0.42, o.r * 1.1, 5), [-o.hl * 0.18, o.r * 0.95, 0], null, [0, 0, -0.25]);
+  for (const side of [-1, 1]) {
+    dark.add(new THREE.ConeGeometry(o.r * 0.5, o.hl * 0.42, 4),
+      [-o.hl * 1.02, o.r * 0.1, side * o.hl * 0.17], [1, 1, 0.35], [0, side * 0.5, Math.PI / 2]);
   }
+  g.add(dark.mesh(M.whale));
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 7), M.whaleBelly);
+  belly.scale.set(o.hl * 0.86, o.r * 0.6, o.r * 0.95);
+  belly.position.y = -o.r * 0.55;
+  g.add(belly);
   g.position.y = 1.5;
   return g;
 }
@@ -886,7 +907,7 @@ function makeWhirlpool(o) {
   const funnel = new THREE.Mesh(new THREE.ConeGeometry(o.R * 0.62, 34, 12, 1, true), M.swirl);
   funnel.position.y = -15;
   g.add(funnel);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(o.R * 0.6, 1.8, 4, 20), M.white);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(o.R * 0.6, 1.8, 4, 20), mat(COL.cyan, { side: THREE.DoubleSide }));
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 1.2;
   g.add(ring);
@@ -894,36 +915,29 @@ function makeWhirlpool(o) {
   return g;
 }
 
-// All of a level's viruses in three instanced draw calls. Each one is a
-// welded core, a welded set of spikes and knobs, and the pale surface dots.
-function buildViruses(count) {
-  const coreGeo = new THREE.IcosahedronGeometry(11, 0);
-  const spikeGeo = new THREE.ConeGeometry(2.4, 8, 4);
-  const knobGeo = new THREE.SphereGeometry(2.6, 5, 4);
+// All of a level's sharks in three instanced draw calls: body, pale belly and
+// the fins. They sit at the surface so the dorsal fin reads from behind.
+function buildSharks(count) {
+  const body = Welder();
+  const b = new THREE.SphereGeometry(1, 12, 9);
+  body.add(b, [0, 0, 0], [17, 6, 7.5]);
+  body.add(new THREE.ConeGeometry(5.5, 13, 7), [18, 0, 0], null, [0, 0, -Math.PI / 2]);   // snout
 
-  // Spikes point along the hull's own vertex directions so they sit flush.
-  const dirs = [];
-  const pos = coreGeo.attributes.position;
-  const up = new THREE.Vector3(0, 1, 0);
-  for (let i = 0; i < pos.count; i += 3) {
-    const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize();
-    if (!dirs.some((d) => d.dot(v) > 0.9)) dirs.push(v);
+  const belly = Welder();
+  belly.add(new THREE.SphereGeometry(1, 10, 7), [0, -2.4, 0], [14.5, 3.4, 6]);
+
+  const fins = Welder();
+  fins.add(new THREE.ConeGeometry(4.6, 11, 4), [-1, 7, 0], [1, 1, 0.35], [0, 0, -0.3]);    // dorsal
+  for (const side of [-1, 1]) {
+    fins.add(new THREE.ConeGeometry(3.6, 9, 4), [4, -2, side * 5], [1, 1, 0.3], [0, 0, side * 0.5]);
   }
-  const spikes = Welder();
-  for (const d of dirs) {
-    const q = new THREE.Quaternion().setFromUnitVectors(up, d);
-    spikes.add(spikeGeo, d.clone().multiplyScalar(13).toArray(), null, null, q);
-    spikes.add(knobGeo, d.clone().multiplyScalar(18).toArray());
-  }
-  const dots = Welder();
-  for (const [a, b, c] of [[-4, -3, 8], [5, 4, 8], [0, 6, 8.5]]) {
-    dots.add(new THREE.SphereGeometry(2.4, 5, 4), [a, b, c]);
-  }
+  fins.add(new THREE.ConeGeometry(5.5, 12, 4), [-18, 2.5, 0], [1, 1, 0.3], [0, 0, 1.1]);   // tail
+  fins.add(new THREE.ConeGeometry(4.2, 9, 4), [-18, -2.5, 0], [1, 1, 0.3], [0, 0, 2.1]);
 
   const meshes = [
-    new THREE.InstancedMesh(coreGeo, M.virus, count),
-    new THREE.InstancedMesh(weld([{ geo: spikes.geo(), m: new THREE.Matrix4() }]), M.virusDark, count),
-    new THREE.InstancedMesh(dots.geo(), M.virusCore, count),
+    new THREE.InstancedMesh(body.geo(), M.shark, count),
+    new THREE.InstancedMesh(belly.geo(), M.sharkBelly, count),
+    new THREE.InstancedMesh(fins.geo(), M.shark, count),
   ];
   for (const m of meshes) { m.frustumCulled = false; m.count = count; }
   return meshes;
@@ -1142,11 +1156,11 @@ function makeLlamaBoat() {
   const oars = [];
   for (const side of [-1, 1]) {
     const oar = new THREE.Group();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 30, 5), M.logDark);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 30, 5), M.mast);
     shaft.rotation.z = Math.PI / 2;
     shaft.position.x = side * 15;
     oar.add(shaft);
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(9, 1.2, 6), M.log);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(9, 1.2, 6), M.deck);
     blade.position.set(side * 30, 0, 0);
     oar.add(blade);
     oar.position.set(0, 8, 2);
@@ -1179,13 +1193,13 @@ function makeLlamaBoat() {
   return g;
 }
 
-// Straight stretch of river shown behind the menus.
+// Stretch of open sea shown behind the menus.
 const MENU_RIVER = { riverWidth: 260, meanderAmp: 22, meanderLen: 760, speed: 110 };
 
-function buildMenuRiver() {
+function buildMenuSea() {
   const level = MENU_RIVER;
   const g = new THREE.Group();
-  g.add(buildBanks(level, -700, 1500));
-  g.add(buildProps(level, -680, 1480));
+  g.add(buildDistantLand(level, -700, 1500));
+  g.add(buildBuoys(level, -600, 1400));
   return g;
 }

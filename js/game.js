@@ -1,7 +1,7 @@
 // One play-through of a level: entities, simulation, scoring.
 import { LEVELS, START_Y, generateLevel, riverBounds } from './levels.js';
 import { makeBoat, makeSpit } from './entities.js';
-import { updateLog, boatHits, applyWhirlpool, clampToBanks, dist } from './physics.js';
+import { updateWhale, boatHits, applyWhirlpool, clampToBanks, dist } from './physics.js';
 
 const STEER_RATE = 11;     // how quickly boat.x follows targetX
 const KEY_SPEED = 300;     // units/s for keyboard steering
@@ -20,8 +20,8 @@ export class Session {
 
     const data = generateLevel(this.level);
     this.obstacles = data.obstacles;
-    this.viruses = data.viruses;
-    this.totalViruses = this.viruses.length;
+    this.sharks = data.sharks;
+    this.totalSharks = this.sharks.length;
     this.spits = [];
     this.spitCd = 0;
 
@@ -44,7 +44,7 @@ export class Session {
     this.boat.targetX += dx;
   }
 
-  // Llama spits up-river. Rate-limited, and ignored once the run is over.
+  // Llama spits ahead. Rate-limited, and ignored once the run is over.
   spit() {
     if (this.status !== 'playing' || this.spitCd > 0) return false;
     this.spitCd = SPIT_COOLDOWN;
@@ -97,7 +97,7 @@ export class Session {
     const near = 220;
     for (const o of this.obstacles) {
       if (Math.abs(o.y - boat.y) > near) continue;
-      if (o.type === 'log') updateLog(o, dt, level);
+      if (o.type === 'whale') updateWhale(o, dt, level);
       if (o.type === 'whirlpool') {
         o.spin += dt * 3;
         this.pull = Math.max(this.pull, applyWhirlpool(boat, o, dt));
@@ -105,8 +105,8 @@ export class Session {
       if (boat.invuln <= 0 && boatHits(boat, o)) this.takeHit(o);
     }
 
-    // Viruses wobble in place; touching one costs a heart and bursts it.
-    for (const v of this.viruses) {
+    // Sharks circle in place; touching one costs a heart and drives it off.
+    for (const v of this.sharks) {
       if (v.dead || Math.abs(v.y - boat.y) > 620) continue;
       v.x = v.bx + Math.sin(this.time * 1.2 + v.phase) * v.amp;
       v.spin += dt * 2.2;
@@ -116,7 +116,7 @@ export class Session {
       }
     }
 
-    // Spit flies up-river until it hits a virus, runs out or leaves the banks.
+    // Spit flies ahead until it hits a shark, runs out or leaves the channel.
     for (let i = this.spits.length - 1; i >= 0; i--) {
       const s = this.spits[i];
       s.y += s.vy * dt;
@@ -124,7 +124,7 @@ export class Session {
       if (s.life <= 0 || s.y - boat.y > SPIT_RANGE) { this.spits.splice(i, 1); continue; }
       if (Math.random() < 0.4) this.spawnParticle(s.x, s.y - 6, 18, 0.2, 'rgba(235,255,215,0.9)');
       let hit = false;
-      for (const v of this.viruses) {
+      for (const v of this.sharks) {
         if (v.dead || Math.abs(v.y - s.y) > 40) continue;
         if (dist(s.x, s.y, v.x, v.y) < s.r + v.r) {
           this.burst(v, true);
@@ -210,11 +210,11 @@ export class Session {
     this.flash = Math.max(0, this.flash - 1.8 * dt);
   }
 
-  // 1 star for finishing, +1 for 2+ hearts, +1 for zapping 70%+ of the viruses
+  // 1 star for finishing, +1 for 2+ hearts, +1 for driving off 70%+ of the sharks
   stars() {
     let s = 1;
     if (this.boat.hearts >= 2) s++;
-    if (this.totalViruses === 0 || this.zapped / this.totalViruses >= 0.7) s++;
+    if (this.totalSharks === 0 || this.zapped / this.totalSharks >= 0.7) s++;
     return s;
   }
 

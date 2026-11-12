@@ -6,11 +6,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#2a7fc0">
-<title>Llama Crossing</title>
+<meta name="theme-color" content="#021a3b">
+<title>Explorer Quest — Crossing</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -20,15 +23,18 @@
 <div id="hud" class="layer hidden">
   <div id="hearts" class="hud-item" aria-label="Hearts"></div>
   <div class="hud-right">
-    <div id="zapped" class="hud-item">🦠 0</div>
+    <div id="zapped" class="hud-item">🦈 0</div>
     <button id="btn-pause" class="icon-btn" aria-label="Pause">❚❚</button>
   </div>
 </div>
 
 <!-- Screens -->
 <div id="screen-title" class="layer screen active">
-  <h1>Llama<br>Crossing</h1>
-  <p class="tag">Row from A to B.<br>Dodge the river. Spit the viruses.</p>
+  <div id="brand">
+    <span class="wordmark">Explorer Quest</span>
+    <svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L14.35 8.76 L21.51 8.91 L15.8 13.24 L17.88 20.09 L12 16 L6.12 20.09 L8.2 13.24 L2.49 8.91 L9.65 8.76 Z"/></svg>
+  </div>
+  <p class="tag">Row the channel from A to B.<br>Mind the whales. See off the sharks.</p>
   <button id="btn-play" class="btn primary">Play</button>
   <button id="btn-mute" class="btn ghost">🔊 Sound on</button>
   <a class="btn ghost" href="2d/">Play the 2D classic →</a>

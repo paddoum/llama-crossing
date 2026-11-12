@@ -27,11 +27,11 @@ export function renderSession(ctx, s, view, t) {
 
   // Whirlpools sit under everything else
   for (const o of s.obstacles) if (o.type === 'whirlpool' && inView(o.y, camY, H, 80)) drawWhirlpool(ctx, o.x, toY(o.y), o, t);
-  for (const v of s.viruses) if (!v.dead && inView(v.y, camY, H, 40)) drawVirus(ctx, v.x, toY(v.y), v);
+  for (const v of s.sharks) if (!v.dead && inView(v.y, camY, H, 40)) drawShark(ctx, v.x, toY(v.y), v);
   for (const o of s.obstacles) {
     if (!inView(o.y, camY, H, 80)) continue;
     if (o.type === 'rock') drawRock(ctx, o.x, toY(o.y), o, t);
-    else if (o.type === 'log') drawLog(ctx, o.x, toY(o.y), o);
+    else if (o.type === 'whale') drawWhale(ctx, o.x, toY(o.y), o);
   }
 
   for (const sp of s.spits) if (inView(sp.y, camY, H, 30)) drawSpit(ctx, sp.x, toY(sp.y), sp);
@@ -222,7 +222,7 @@ function drawRock(ctx, x, y, o, t) {
   ctx.beginPath(); ctx.ellipse(x - o.r * 0.25, y - o.r * 0.3, o.r * 0.42, o.r * 0.3, -0.5, 0, Math.PI * 2); ctx.fill();
 }
 
-function drawLog(ctx, x, y, o) {
+function drawWhale(ctx, x, y, o) {
   const w = o.hl, r = o.r;
   ctx.fillStyle = 'rgba(0,40,80,0.25)';
   ctx.beginPath(); ctx.roundRect(x - w - r, y - r + 3, (w + r) * 2, r * 2, r); ctx.fill();
@@ -266,7 +266,7 @@ function drawWhirlpool(ctx, x, y, o, t) {
   ctx.beginPath(); ctx.arc(x, y, o.r * 0.55, 0, Math.PI * 2); ctx.fill();
 }
 
-function drawVirus(ctx, x, y, v) {
+function drawShark(ctx, x, y, v) {
   const r = v.r;
   ctx.save();
   ctx.translate(x, y);

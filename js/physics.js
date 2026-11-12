@@ -5,22 +5,22 @@ export function dist(ax, ay, bx, by) {
 }
 
 // Distance from point to a horizontal capsule's core segment.
-export function distToLog(px, py, log) {
-  const cx = Math.max(log.x - log.hl, Math.min(log.x + log.hl, px));
-  return Math.hypot(px - cx, py - log.y);
+export function distToWhale(px, py, whale) {
+  const cx = Math.max(whale.x - whale.hl, Math.min(whale.x + whale.hl, px));
+  return Math.hypot(px - cx, py - whale.y);
 }
 
-export function updateLog(log, dt, level) {
-  log.x += log.vx * dt;
-  const b = riverBounds(level, log.y);
-  if (log.x - log.ext < b.left) { log.x = b.left + log.ext; log.vx = Math.abs(log.vx); }
-  else if (log.x + log.ext > b.right) { log.x = b.right - log.ext; log.vx = -Math.abs(log.vx); }
+export function updateWhale(whale, dt, level) {
+  whale.x += whale.vx * dt;
+  const b = riverBounds(level, whale.y);
+  if (whale.x - whale.ext < b.left) { whale.x = b.left + whale.ext; whale.vx = Math.abs(whale.vx); }
+  else if (whale.x + whale.ext > b.right) { whale.x = b.right - whale.ext; whale.vx = -Math.abs(whale.vx); }
 }
 
 export function boatHits(boat, o) {
   switch (o.type) {
     case 'rock': return dist(boat.x, boat.y, o.x, o.y) < boat.r + o.r - 4;
-    case 'log': return distToLog(boat.x, boat.y, o) < boat.r + o.r - 3;
+    case 'whale': return distToWhale(boat.x, boat.y, o) < boat.r + o.r - 3;
     case 'whirlpool': return dist(boat.x, boat.y, o.x, o.y) < o.r + boat.r * 0.35;
   }
   return false;

@@ -19,11 +19,11 @@ export function makeRock(rng, left, right, y) {
   return { type: 'rock', x: rng.range(left + r, right - r), y, r, ext: r, seed: rng.next() };
 }
 
-export function makeLog(rng, left, right, y) {
+export function makeWhale(rng, left, right, y) {
   const hl = rng.range(26, 48);
   const r = 9;
   return {
-    type: 'log', x: rng.range(left + hl + r, right - hl - r), y, hl, r, ext: hl + r,
+    type: 'whale', x: rng.range(left + hl + r, right - hl - r), y, hl, r, ext: hl + r,
     vx: rng.pick([-1, 1]) * rng.range(28, 62),
     seed: rng.next(),
   };
@@ -35,10 +35,10 @@ export function makeWhirlpool(rng, left, right, y) {
   return { type: 'whirlpool', x: rng.range(left + 30, right - 30), y, r, R, ext: 22, spin: rng.next() * 6 };
 }
 
-// Viruses drift in place and hurt on contact; spit kills them.
-export function makeVirus(rng, x, y) {
+// Sharks drift in place and hurt on contact; spit drives them off.
+export function makeShark(rng, x, y) {
   return {
-    type: 'virus',
+    type: 'shark',
     x, bx: x, y,
     r: 13,
     amp: rng.range(6, 20),

@@ -1,6 +1,27 @@
-# Llama Crossing
+# Explorer Quest — Crossing
 
-A mobile-first web game: a llama sails from shore **A** to dock **B**, dodging rocks, drifting logs and whirlpools, and spitting at the viruses floating in the river. No build step and no image assets -- everything is drawn in code.
+Branded for **Argonaut United**. The identity is read from the app itself
+(`/Users/pierre/Documents/PresetLive_Argonauts2026`, `src/style.css`), not invented:
+
+| | |
+|---|---|
+| Navy (base) | `#021a3b` |
+| Surface / page / tab bar | `#0e2549` · `#153756` · `#153d68` |
+| Azure · deep cyan · cyan | `#1884c6` · `#058cac` · `#22bae7` |
+| Gold · magenta | `#c8980a` · `#ac2caf` |
+
+The wordmark is the app's own `AppLogo`: "Explorer Quest" in condensed uppercase over a star (the star path is copied from `src/assets/star.svg`).
+
+> **Font caveat.** The app sets **din-condensed** from an Adobe Fonts kit (`use.typekit.net/gik8sjj.css`). Typekit kits are licensed to specific domains, so that kit can't be loaded from this game's host. This uses **Barlow Condensed** from Google Fonts — the first fallback the app's own `--font-sans` declares, and a close match. To use the real face, add this game's domain to the kit and swap the `<link>` in `index.html`.
+
+## The sea
+
+The course is open sea, not a canal. Paired buoys stand where the banks used to — magenta to port, gold to starboard — so the channel the boat is *clamped* to is the one the player can actually see; low land sits far out on both beams to give the eye something to measure speed against, which bare water does not. Hazards are **sharks** (spit drives them off) and **whales** (drifting, solid), plus reefs and whirlpools.
+
+Two colours are set for legibility rather than taste, and both were measured against the rendered sea: the whales are `#3d7ba6` because at their natural `#16426a` they were within a few luminance points of the water and effectively invisible, and the sharks carry an emissive lift so they hold their azure in shadow. Measured contrast against the sea: whales +44, sharks +48.
+
+
+A mobile-first web game: a llama rows from **A** to **B**, dodging rocks, drifting logs and whirlpools, and spitting at the viruses floating in the river. No build step and no image assets -- everything is drawn in code.
 
 Two builds share one simulation:
 

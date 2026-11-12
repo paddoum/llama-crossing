@@ -143,7 +143,7 @@ export class App {
     saveProgress(this.progress);
 
     $('complete-stars').innerHTML = '★'.repeat(stars) + `<span class="off">${'★'.repeat(3 - stars)}</span>`;
-    $('complete-info').textContent = `${s.level.name} · ${s.zapped}/${s.totalViruses} viruses zapped · ${s.boat.hearts} ♥ left` + (isLast ? '\nYou crossed them all!' : '');
+    $('complete-info').textContent = `${s.level.name} · ${s.zapped}/${s.totalSharks} sharks driven off · ${s.boat.hearts} ♥ left` + (isLast ? '\nYou crossed them all!' : '');
     $('btn-next').classList.toggle('hidden', isLast);
     this.show('complete');
     this.sfx.stopAmbient();
@@ -169,7 +169,7 @@ export class App {
     }
     if (s.zapped !== this.lastZapped) {
       this.lastZapped = s.zapped;
-      $('zapped').textContent = `🦠 ${s.zapped}`;
+      $('zapped').textContent = `🦈 ${s.zapped}`;
     }
 
     if (s.status === 'won' && s.endTimer > 1.1) this.finishWon();
