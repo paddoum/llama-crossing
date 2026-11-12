@@ -93,6 +93,29 @@ js/version.js         build label
 
 `state.js` is renderer-agnostic: it takes an object exposing `renderSession(session, t)` and `renderBackdrop(t)`, which is the whole seam between the two builds.
 
+## Model credits
+
+All from Sketchfab under **CC BY 4.0**; the credit is shown on the title screen as the licence requires, so don't remove it.
+
+| Asset | Model | Author |
+|---|---|---|
+| Boat | Stylized Low Poly Rowboat with Paddles | [Muyaya Concept](https://sketchfab.com/muyayaconcept) |
+| Buoy | Red Marine Navigation Buoy (Game Ready) | [Muyaya Concept](https://sketchfab.com/muyayaconcept) |
+| Shark | Stylized Shark | [kasperromer](https://sketchfab.com/kasperromer) |
+| Whale | Low poly animated Cartoon Whale | [Blue Colossus Studio](https://sketchfab.com/BlueColossus) |
+
+### Sea life
+
+The shark and whale are **rigged and animated**, so they can't be instanced — each one is a `SkeletonUtils.clone()` with its own `AnimationMixer`, wound to a different point in the loop. Headings were read off the rigs rather than guessed: the shark's jaw bones sit at **+Z**, the whale's tail fins at **+Z**, so the two face opposite ways and are yawed accordingly. The whale also yaws 180° with its drift so it always swims forwards.
+
+Three things are set by measurement, and are worth keeping if you touch this:
+
+- **Only creatures within `ANIMATE_WITHIN` of the boat are posed.** Skinning 26 skeletons a frame was the single biggest cost; distant ones hold their last frame, which no one can see.
+- **Buoys are spaced at 185, not 115.** The modelled buoy is ~1,300 triangles against the stand-in's ~200, and at the tighter spacing a long course spent 100k triangles on distant scenery.
+- **The buoy's texture is discarded** in favour of flat brand colours. It ships as a *red* buoy, and tinting a red texture magenta just produces mud (measured `#550707`); port magenta and starboard gold only read as themselves with the map removed.
+
+Frame cost with all of it in: 136k triangles, 91 draw calls, 60 fps (p99 27.7 ms).
+
 ## The boat model
 
 `assets/rowboat.glb` — **"Stylized Low Poly Rowboat with Paddles" by [Muyaya Concept](https://sketchfab.com/3d-models/stylized-low-poly-rowboat-with-paddles-f2c35c716f32474e96cce3625073e6b8), licensed [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).** CC BY requires attribution wherever the work is used, so the credit is shown on the title screen as well as here — don't remove it.

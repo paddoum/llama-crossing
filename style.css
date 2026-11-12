@@ -292,7 +292,9 @@ a.btn { text-decoration: none; display: flex; align-items: center; justify-conte
 /* Model attribution (CC BY requires it to be visible) */
 .credit {
   margin-top: 2px;
+  max-width: 320px;
   font-size: 12px;
+  line-height: 1.35;
   opacity: .72;
 }
 .credit a { color: inherit; pointer-events: auto; }

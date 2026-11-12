@@ -2,6 +2,7 @@
 // World -> scene: X = x - 180 (across the river), Y = up, Z = -y (downriver is +Z).
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { LOGICAL_W, riverBounds, riverCenter } from './levels.js';
 
 const HALF = LOGICAL_W / 2;
@@ -217,6 +218,17 @@ const ARM = { shoulderY: -0.18, shoulderZ: 0.08, falloff: 0.30, restY: -0.90, re
 
 // Sculpted rowboat. Modelled Y-up with the bow at +X, so it gets a quarter
 // turn to point down-river. The oars are separate nodes, so they can row.
+// Sea life from Sketchfab (CC BY -- see the credits in the README and on the
+// title screen). Orientation was read off the rigs: the shark's jaw bones sit
+// at +Z, the whale's tail fins at +Z, so their headings differ by 180 degrees.
+const SEA_LIFE = {
+  shark: { url: 'assets/shark.glb', scale: 3.4, yaw: Math.PI / 2, clip: /swim$/i },
+  whale: { url: 'assets/whale.glb', perUnit: 2.33, yaw: -Math.PI / 2, clip: /swimming/i },
+  buoy: { url: 'assets/buoy.glb', scale: 2.0 },
+};
+
+const ANIMATE_WITHIN = 900;   // only pose creatures this close to the boat
+
 const BOAT_URL = 'assets/rowboat.glb';
 // The hull is shallow next to the wave amplitude, and the boat takes its
 // height from a single wave sample at its centre, so the ends can dip. It
@@ -256,7 +268,7 @@ export class Renderer3D {
     this.particles = this.makeParticles();
     this.scene.add(this.particles);
 
-    this.menuGroup = buildMenuSea();
+    this.menuGroup = buildMenuSea(this);
     this.scene.add(this.menuGroup);
 
     this.levelGroup = null;
@@ -272,6 +284,7 @@ export class Renderer3D {
 
     this.loadLlama();
     this.loadBoat();
+    this.loadSeaLife();
 
     this.fx = document.getElementById('fx');
     this.progress = document.getElementById('progress');
@@ -340,6 +353,69 @@ export class Renderer3D {
 
   // Same background-load pattern as the llama: the code-built boat rows until
   // the sculpted one arrives.
+  // Sharks and whales are rigged and animated, so they are cloned per instance
+  // with their own mixer rather than instanced -- skinning rules instancing
+  // out. The code-built shapes stand in until these land, and the scene is
+  // rebuilt once they do.
+  loadSeaLife() {
+    const loader = new GLTFLoader();
+    this.mixers = [];
+    for (const [kind, cfg] of Object.entries(SEA_LIFE)) {
+      loader.load(cfg.url, (gltf) => {
+
+        if (kind === 'buoy') {
+          // One static mesh: keep geometry and material so it can be instanced.
+          let mesh = null;
+          gltf.scene.updateMatrixWorld(true);
+          gltf.scene.traverse((o) => { if (o.isMesh && !mesh) mesh = o; });
+          if (mesh) {
+            const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+            geo.scale(cfg.scale, cfg.scale, cfg.scale);
+            this.buoyModel = { geo, material: mesh.material };
+          }
+        } else {
+          if (kind === 'shark') {
+            gltf.scene.traverse((o) => {
+              if (!o.isMesh || !/body|jaw/i.test(o.material.name || '')) return;
+              o.material = o.material.clone();
+              o.material.color = new THREE.Color(COL.shark);
+              o.material.emissive = new THREE.Color(0x0d3a5c);
+            });
+          }
+          this[`${kind}Model`] = { gltf, cfg };
+        }
+        this.rebuildScene();
+      }, undefined, (err) => console.warn(`${kind} model failed to load; keeping the built-in one.`, err));
+    }
+  }
+
+  // Drop the built scenery so the next frame rebuilds it with whatever has
+  // arrived. Cheap: it only happens as each model finishes downloading.
+  rebuildScene() {
+    this.disposeLevel();
+    if (this.menuGroup) {
+      this.scene.remove(this.menuGroup);
+      this.menuGroup.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    }
+    this.menuGroup = buildMenuSea(this);
+    this.scene.add(this.menuGroup);
+  }
+
+  // One animated clone, wound to its own point in the loop.
+  spawnSwimmer(kind, offset) {
+    const entry = this[`${kind}Model`];
+    if (!entry) return null;
+    const obj = cloneSkinned(entry.gltf.scene);
+    const clip = entry.gltf.animations.find((a) => entry.cfg.clip.test(a.name)) || entry.gltf.animations[0];
+    if (clip) {
+      const mixer = new THREE.AnimationMixer(obj);
+      mixer.clipAction(clip).play();
+      mixer.setTime(offset % clip.duration);
+      this.mixers.push({ mixer, obj });
+    }
+    return obj;
+  }
+
   loadBoat() {
     new GLTFLoader().load(BOAT_URL, (gltf) => {
       const model = new THREE.Group();
@@ -506,6 +582,17 @@ export class Renderer3D {
   }
 
   updateSharks(session, t) {
+    // Modelled sharks: each is its own object, so they are placed directly.
+    if (this.sharkSwimmers && this.sharkSwimmers.length) {
+      for (const { v, holder } of this.sharkSwimmers) {
+        holder.visible = !v.dead;
+        if (v.dead) continue;
+        holder.position.set(v.x - HALF, 1.2 + Math.sin(t * 2.1 + v.phase) * 1.1, -v.y);
+        holder.rotation.y = SEA_LIFE.shark.yaw + Math.sin(t * 0.9 + v.phase) * 0.45;
+        holder.rotation.z = Math.sin(t * 1.3 + v.phase) * 0.1;
+      }
+      return;
+    }
     if (!this.sharkMeshes.length) return;
     const m = this._m4 || (this._m4 = new THREE.Matrix4());
     const q = this._q || (this._q = new THREE.Quaternion());
@@ -553,7 +640,7 @@ export class Renderer3D {
     const g = new THREE.Group();
 
     g.add(buildDistantLand(level, -340, level.length + 420));
-    g.add(buildBuoys(level, -120, level.length - 40));
+    g.add(buildBuoys(level, -120, level.length - 40, 185, this));
     g.add(buildStart(level));
     g.add(buildDock(level));
 
@@ -562,14 +649,40 @@ export class Renderer3D {
     for (const o of session.obstacles) {
       let mesh;
       if (o.type === 'rock') mesh = makeRock(o);
-      else if (o.type === 'whale') { mesh = makeWhale(o); this.whaleMeshes.push({ o, mesh }); }
+      else if (o.type === 'whale') {
+        const swimmer = this.spawnSwimmer('whale', o.y * 0.013);
+        if (swimmer) {
+          mesh = new THREE.Group();
+          swimmer.scale.setScalar(o.hl * SEA_LIFE.whale.perUnit);
+          swimmer.rotation.y = SEA_LIFE.whale.yaw;
+          mesh.add(swimmer);
+          mesh.position.y = 1.5;
+        } else {
+          mesh = makeWhale(o);
+        }
+        this.whaleMeshes.push({ o, mesh });
+      }
       else { mesh = makeWhirlpool(o); this.swirlMeshes.push({ o, mesh }); }
       mesh.position.set(o.x - HALF, mesh.position.y, -o.y);
       g.add(mesh);
     }
 
-    this.sharkMeshes = session.sharks.length ? buildSharks(session.sharks.length) : [];
-    for (const m of this.sharkMeshes) g.add(m);
+    this.sharkSwimmers = [];
+    this.sharkMeshes = [];
+    if (this.sharkModel) {
+      session.sharks.forEach((v, i) => {
+        const swimmer = this.spawnSwimmer('shark', i * 0.37);
+        if (!swimmer) return;
+        swimmer.scale.setScalar(SEA_LIFE.shark.scale);
+        const holder = new THREE.Group();
+        holder.add(swimmer);
+        this.sharkSwimmers.push({ v, holder });
+        g.add(holder);
+      });
+    } else if (session.sharks.length) {
+      this.sharkMeshes = buildSharks(session.sharks.length);
+      for (const m of this.sharkMeshes) g.add(m);
+    }
 
     this.scene.add(g);
     this.levelGroup = g;
@@ -578,6 +691,8 @@ export class Renderer3D {
   }
 
   disposeLevel() {
+    this.mixers = [];
+    this.sharkSwimmers = [];
     if (!this.levelGroup) return;
     this.levelGroup.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     this.scene.remove(this.levelGroup);
@@ -620,6 +735,7 @@ export class Renderer3D {
     }
     this.updateSharks(session, t);
     this.updateSpits(session, t);
+    this.updateMixers(dt);
 
     this.updateParticles(session, t);
 
@@ -695,6 +811,18 @@ export class Renderer3D {
       this.menuLook.x += (this.menuTip.x - targetX) * gain * this.camera.aspect;
     }
     this.camera.lookAt(this.menuLook);
+  }
+
+  // Skinning is the expensive part, and a course holds dozens of creatures.
+  // Only the ones near the boat are posed; the rest hold their last frame,
+  // which is invisible at that distance.
+  updateMixers(dt) {
+    if (!this.mixers) return;
+    const z = this.boat.position.z;
+    for (const { mixer, obj } of this.mixers) {
+      obj.updateWorldMatrix(true, false);
+      if (Math.abs(obj.matrixWorld.elements[14] - z) < ANIMATE_WITHIN) mixer.update(dt);
+    }
   }
 
   renderBackdrop(t) {
@@ -787,22 +915,29 @@ function buoyGeometry() {
 
 // The buoys are the course: they stand where the banks used to, so the channel
 // the boat is clamped to is the one the player can see.
-function buildBuoys(level, yFrom, yTo, step = 115) {
+// The modelled buoy is ~1,300 triangles against the stand-in's ~200, so they
+// are spaced further apart: at 115 a long course spent 100k triangles on
+// scenery that is mostly distant.
+function buildBuoys(level, yFrom, yTo, step = 185, renderer = null) {
   const slots = [];
   for (let y = yFrom; y <= yTo; y += step) {
     const b = riverBounds(level, y);
     slots.push({ x: b.left - HALF - 6, z: -y, side: -1 });
     slots.push({ x: b.right - HALF + 6, z: -y, side: 1 });
   }
-  const geo = buoyGeometry();
+  const model = renderer && renderer.buoyModel;
+  const geo = model ? model.geo : buoyGeometry();
   const g = new THREE.Group();
   for (const side of [-1, 1]) {
     const mine = slots.filter((p) => p.side === side);
     if (!mine.length) continue;
-    const mesh = new THREE.InstancedMesh(geo, side < 0 ? M.buoyPort : M.buoyStbd, mine.length);
+    // Port magenta, starboard gold. The model is a red buoy, so its material
+    // is tinted per side rather than used as it comes.
+    const material = side < 0 ? M.buoyPort : M.buoyStbd;
+    const mesh = new THREE.InstancedMesh(geo, material, mine.length);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
     mine.forEach((p, i) => {
-      m.compose(new THREE.Vector3(p.x, -3, p.z), q, one);
+      m.compose(new THREE.Vector3(p.x, model ? 0 : -3, p.z), q, one);
       mesh.setMatrixAt(i, m);
     });
     mesh.frustumCulled = false;
@@ -1196,10 +1331,10 @@ function makeLlamaBoat() {
 // Stretch of open sea shown behind the menus.
 const MENU_RIVER = { riverWidth: 260, meanderAmp: 22, meanderLen: 760, speed: 110 };
 
-function buildMenuSea() {
+function buildMenuSea(renderer = null) {
   const level = MENU_RIVER;
   const g = new THREE.Group();
   g.add(buildDistantLand(level, -700, 1500));
-  g.add(buildBuoys(level, -600, 1400));
+  g.add(buildBuoys(level, -600, 1400, 185, renderer));
   return g;
 }
