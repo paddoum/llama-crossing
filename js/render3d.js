@@ -161,7 +161,7 @@ void main() {
   vec4 world = modelMatrix * vec4(position, 1.0);
   // Flatten towards the rim of the sheet so it blends into the far plane.
   float edge = max(abs(position.x), abs(position.y)) / uTaperHalf;
-  float amp = uAmp * (1.0 - smoothstep(0.55, 1.0, edge));
+  float amp = uAmp * (1.0 - smoothstep(0.84, 1.0, edge));
   vec2 p = vec2(world.x, world.z + uFlow * uTime) * ${WAVE.scale.toFixed(3)};
   float h = (getwaves(p) - 0.5) * ${WAVE.amp.toFixed(2)};
   world.y += amp * h;
@@ -175,13 +175,18 @@ void main() {
 const WATER_FRAG = `
 #include <fog_pars_fragment>
 uniform vec3 uSunDir, uSunCol, uSkyCol, uSkyTop, uSkyLow, uGroundCol, uShallow, uDeep, uFoam, uCamPos;
-uniform float uTime, uMeanderAmp, uMeanderLen, uHalfWidth, uShore, uFacet, uSkyFloor;
+uniform float uTime, uMeanderAmp, uMeanderLen, uHalfWidth, uShore, uFacet, uSkyFloor, uCell;
 varying vec3 vWorld;
 varying float vCrest;
 
-// Constant across a triangle, because it is derived from the facet normal.
-float facetNoise(vec3 n) {
-  return fract(sin(dot(n.xz, vec2(12.9898, 78.233)) * 431.7) * 43758.5453);
+// One value per grid cell of the water sheet. Hashing the facet NORMAL looks
+// equivalent and is not: these waves have broad flat troughs, so every facet
+// down there shares a normal, draws the same number, and the whole trough
+// comes out one colour. The waves displace vertically only, so world XZ still
+// lines up with the mesh grid and quantising it gives a stable per-cell value.
+float cellNoise(vec2 worldXZ) {
+  vec2 id = floor(worldXZ / uCell);
+  return fract(sin(dot(id, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
 // What a reflected ray sees. The app looks its reflection up in the real
@@ -211,8 +216,12 @@ void main() {
 
   vec3 ambient = mix(uGroundCol, uSkyCol, N.y * 0.5 + 0.5);
   float diff = max(dot(N, uSunDir), 0.0);
-  vec3 base = mix(uDeep, uShallow, smoothstep(-2.0, 2.2, vCrest));
-  base *= 0.90 + facetNoise(flatN) * 0.24;
+  // Wider than the wave's own range, so deep troughs keep a gradient instead
+  // of clamping flat onto uDeep.
+  vec3 base = mix(uDeep, uShallow, smoothstep(-3.0, 3.0, vCrest));
+  float cellV = cellNoise(vWorld.xz) - 0.5;
+  base *= 1.0 + cellV * 0.28;
+  base += vec3(0.010, 0.018, 0.028) * cellV * 2.0;
 
   vec3 col = base * (ambient * 0.78 + uSunCol * diff * 0.45);
   // Broad highlight. Tighter than this and a faceted surface almost never
@@ -250,6 +259,7 @@ function makeWaterMaterial({ amp, shore, facet = 1 }) {
         uShore: { value: shore },
         uFacet: { value: facet },
         uSkyFloor: { value: 0.12 },
+        uCell: { value: WATER_SIZE / WATER_SEG },
         uCamPos: { value: new THREE.Vector3() },
         // Deliberately NOT the scene's sun. That one sits behind the camera,
         // which lights the boat and the llama nicely but reflects its glint

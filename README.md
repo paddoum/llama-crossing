@@ -181,6 +181,15 @@ Two values are load-bearing and easy to get wrong:
 - **The water's sun is not the scene's sun.** The scene light sits behind the camera, which lights the boat and llama well but reflects its glint *away* from the viewer — no amount of shader work makes a glint appear from there. `uSunDir` therefore points ahead and up, so the glitter path falls between the boat and the horizon. Stylised, not physical.
 - **The specular exponent must stay tight** (140). Widening it to make glints easier to hit turns whole facets white — measured, that pushed the water's median luminance from 72 to 144 and covered the sea in pale sheets. Sparkle comes from a tight exponent over many facets, not a broad one.
 
+### Flat patches in the troughs
+
+Two things cause unicolour blobs, and the obvious suspect is the lesser one:
+
+- **The rim taper.** The sheet flattens towards its edge so it can meet the far plane without a seam. Starting that at 0.55 of the half-width flattened the water from ~495 units out — well inside the visible course — so mid-distance water went smooth and plain. It starts at 0.84 now; verified no seam appears at the handover (largest row-to-row step 7, in line with ordinary wave variation).
+- **Where the per-cell tint comes from.** Hashing the *facet normal* seems equivalent to hashing position and is not: these waves have broad flat troughs, so every facet down there shares a normal, draws the same number, and the trough comes out one colour. `cellNoise` quantises world XZ instead — which lines up exactly with the mesh, because the waves displace vertically only. The tint is also applied **additively as well as multiplicatively**: ±14% of a near-black trough is ±2 luminance, i.e. invisible.
+
+Together those took flat unicolour blocks from 27% to 14% of the near-water band.
+
 There is deliberately **no foam**: whitecaps and the channel-edge foam were both carried over from the river, and on open water with buoys marking the course there is no shore for either to belong to.
 
 Rejected on purpose, from the references: screen-space reflection (Tardif calls it "really expensive" for little gain on turbulent water -- his scene is ~0.9 ms on an RTX 2080), depth-buffer shorelines and refraction (Azur Games say mobile titles avoid exactly this), normal and flow maps (they measured 4-6 fps back from dropping normal maps alone), and tessellation (absent from WebGL2).
