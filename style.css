@@ -132,6 +132,8 @@ body {
 }
 .screen.active { display: flex; }
 .screen.dim { background: rgba(2, 26, 59, 0.72); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+/* Lighter, so the llama taking its bow on the dock still reads behind it. */
+#screen-complete.dim { background: rgba(2, 26, 59, 0.5); }
 
 /* Explorer Quest wordmark: uppercase condensed over a star, as in the app. */
 #brand {

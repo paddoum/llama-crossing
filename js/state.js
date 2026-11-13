@@ -172,7 +172,10 @@ export class App {
       $('zapped').textContent = `🦈 ${s.zapped}`;
     }
 
-    if (s.status === 'won' && s.endTimer > 1.1) this.finishWon();
+    // The renderer gets to say how long the arrival takes: the 3D build plays
+    // the llama out of the boat and a round of cotillons before the results.
+    const winDelay = this.renderer.winDelay || 1.1;
+    if (s.status === 'won' && s.endTimer > winDelay) this.finishWon();
     else if (s.status === 'lost' && s.endTimer > 1.0) this.finishLost();
   }
 

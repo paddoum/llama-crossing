@@ -244,6 +244,52 @@ Rejected on purpose, from the references: screen-space reflection (Tardif calls 
 
 `WAVE` in `js/render3d.js` is the single definition of the wave set: the GLSL is generated from it and the JS `waveAt()` mirrors it (fewer octaves -- the boat only needs the broad swell).
 
+## The arrival
+
+Crossing the finish line hands the frame over to `Renderer3D`'s cheer, in
+`render3d.js`. Timings live in the `CHEER` block:
+
+1. **0.45s** — the oars freeze where the stroke left them and the boat coasts.
+2. **0.45 → 1.15s** — the llama arcs out of the crew seat onto the dock
+   planks, unwinding the half turn that had it facing the bow, which lands it
+   looking straight down the lens.
+3. **1.15s** — 170 cotillons go off, 110 more at **1.95s**, and the llama
+   bounces on the spot until the results screen arrives at **3.1s**.
+
+Two things are measured rather than assumed, because the sculpted llama and
+the code-built stand-in it falls back to are different shapes: how far the
+hooves hang below the model's own origin (which is what stands it on the
+planks) and its height (which is what the camera frames). `startCheer` poses
+it at the origin, takes a `Box3`, and reads both off that.
+
+The llama is **reparented** out of `boat.userData.crew` into `cheerGroup`,
+which sits at the scene root with an identity transform — so its position is
+world space and the boat can keep bobbing on the swell underneath without
+dragging it along. `endCheer` puts it back, and `disposeLevel` and
+`renderBackdrop` both call it, so a replay starts with a crewed boat. `rig()`
+takes a `crewFree` flag for the interval, so nothing reaches for an oar that
+is no longer being held.
+
+The camera has two framings. While the view is clear it sits `CHEER_CAM_BACK`
+units out, level with the llama. When the results panel appears it re-solves
+against `menuClearNdc()` — backing off far enough to fit the strip the panel
+leaves free, and aiming at the middle of it — which is the same solve
+`frameMenuBoat` does for the boat on the title screen. `#screen-complete` also
+carries a lighter dim than the other overlays so the llama still reads behind
+it.
+
+`state.js` asks the renderer how long to wait (`renderer.winDelay`), so the 2D
+build keeps its old 1.1s and is untouched by any of this.
+
+### Cotillons
+
+An `InstancedMesh` of 300 unlit quads with per-instance colour, a third of
+them long and thin so they read as streamers. Sizes are deliberately small
+(~1.3–2.4 units, streamers 0.7 × 5–8.5): the arrival camera sits ~120 units
+out, so anything above about 2.5 units fills the sky with playing cards.
+Gravity is lightened to 120 and vertical speed is damped, because paper
+floats — at full gravity they are gone before the results screen.
+
 ## Verifying the 3D build
 
 Screenshot tools are unreliable against a WebGL canvas -- they routinely capture a stale frame, which looks exactly like a rendering bug (a missing boat, a river in the wrong place). To check what is really on screen, read the framebuffer instead:

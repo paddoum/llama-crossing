@@ -289,6 +289,9 @@ function makeWaterMaterial({ amp, shore, facet = 1 }) {
 // Portrait is a tall, narrow window: the camera sits high and well back and
 // looks down ~29 degrees, so the river fills the frame with a sliver of sky.
 const FOV = 68, CAM_BACK = 150, CAM_UP = 170, LOOK_AHEAD = 150, LOOK_UP = 4;
+// Where the camera settles for the arrival: in close, looking level at the
+// llama rather than down at the water from the chase height.
+const CHEER_CAM_BACK = 118;
 
 // Menu backdrop. The boat has to fit the strip of screen the menu buttons
 // leave free, which varies with the screen and the window, so the camera
@@ -322,6 +325,27 @@ const SEA_LIFE = {
 };
 
 const ANIMATE_WITHIN = 900;   // only pose creatures this close to the boat
+
+// --- the arrival --------------------------------------------------------
+// At the finish line the llama climbs out onto the dock, turns to face the
+// camera and a cannon of cotillons goes off over its head. Seconds from the
+// moment the bow crosses the line.
+const CHEER = {
+  settle: 0.45,   // oars stowed, the boat coasts the last of it
+  hop: 0.70,      // the arc out of the boat and onto the planks
+  second: 0.80,   // a second, smaller pop after the first
+  total: 3.1,     // when state.js is allowed to put the results screen up
+};
+// Top of the dock planks (buildDock). How far the llama's hooves sit below
+// its own origin is measured at the time, because the sculpted model and the
+// code-built stand-in it falls back to are different shapes.
+const DECK_TOP = 16.4;
+const DOCK_Z_INSET = 19;        // buildDock lays the deck this far past the line
+
+// Cotillons. Flat scraps on ballistic arcs that tumble as they fall --
+// a third of them long and thin, which reads as streamers.
+const CONFETTI_MAX = 300;
+const CONFETTI_COLS = [COL.cyan, COL.gold, COL.magenta, COL.azure, COL.white, COL.deepCyan];
 
 const BOAT_URL = 'assets/rowboat.glb';
 // The hull is shallow next to the wave amplitude, and the boat takes its
@@ -361,6 +385,17 @@ export class Renderer3D {
 
     this.particles = this.makeParticles();
     this.scene.add(this.particles);
+
+    // The arrival: the llama is reparented here when it leaves the boat, so
+    // this group's transform stays identity and its position is world space.
+    this.cheerGroup = new THREE.Group();
+    this.scene.add(this.cheerGroup);
+    this.cheer = null;
+    this.cheerHome = null;
+    this.confetti = this.makeConfetti();
+    this.scene.add(this.confetti);
+    // How long state.js should hold off the results screen (see App.update).
+    this.winDelay = CHEER.total;
 
     this.menuGroup = buildMenuSea(this);
     this.scene.add(this.menuGroup);
@@ -558,7 +593,9 @@ export class Renderer3D {
       builtIn.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
       boat.add(model);
 
-      boat.userData.rig = (t, celebrating, lean = 0) => {
+      // crewFree: the llama has climbed out, so nothing reaches for an oar
+      // and nothing writes to its transform -- the arrival owns it now.
+      boat.userData.rig = (t, celebrating, lean = 0, crewFree = false) => {
         const rate = celebrating ? 9 : 4.4;
         const sweep = Math.sin(t * rate), dip = Math.cos(t * rate);
         for (const { pivot, side } of oars) {
@@ -567,8 +604,9 @@ export class Renderer3D {
           pivot.rotation.y = sweep * 0.52 * side;
           pivot.rotation.x = dip * 0.30;          // blades lift on the recovery
         }
-        if (held.length) this.reachForOar(held);
         model.rotation.z = -lean * 0.12;
+        if (crewFree) return;
+        if (held.length) this.reachForOar(held);
         boat.userData.crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
         boat.userData.liven(t, celebrating);
       };
@@ -654,6 +692,172 @@ export class Renderer3D {
     p.frustumCulled = false;
     p.userData.max = MAX;
     return p;
+  }
+
+  // --- cotillons ---------------------------------------------------------
+  makeConfetti() {
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const m = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false });
+    const mesh = new THREE.InstancedMesh(geo, m, CONFETTI_MAX);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CONFETTI_MAX * 3), 3);
+    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    mesh.visible = false;
+    this.confettiParts = [];
+    this.confettiDummy = new THREE.Object3D();
+    this.confettiCol = new THREE.Color();
+    return mesh;
+  }
+
+  // One pop. Fired up and out of a point, with enough spread to clear the
+  // llama's head before gravity takes over.
+  spawnConfetti(at, count, power = 1) {
+    const parts = this.confettiParts;
+    for (let i = 0; i < count && parts.length < CONFETTI_MAX; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const lift = (0.45 + Math.random() * 0.55) * 185 * power;
+      const out = (0.2 + Math.random() * 0.8) * 125 * power;
+      const streamer = Math.random() < 0.34;
+      parts.push({
+        // Spread the muzzle wide: fired from one point they read as a blob.
+        x: at.x + (Math.random() - 0.5) * 26,
+        y: at.y + 30 + Math.random() * 16,
+        z: at.z + (Math.random() - 0.5) * 26,
+        vx: Math.cos(a) * out,
+        vy: lift,
+        vz: Math.sin(a) * out,
+        rx: Math.random() * Math.PI, ry: Math.random() * Math.PI, rz: Math.random() * Math.PI,
+        sx: (Math.random() - 0.5) * 13, sy: (Math.random() - 0.5) * 13, sz: (Math.random() - 0.5) * 13,
+        // Scraps of paper, not playing cards: the camera sits ~120 units out
+        // for the arrival, so anything over ~2.5 units fills the sky.
+        w: streamer ? 0.7 : 1.3 + Math.random() * 1.1,
+        h: streamer ? 5 + Math.random() * 3.5 : 1.3 + Math.random() * 1.1,
+        life: 2.6 + Math.random() * 1.8,
+        col: CONFETTI_COLS[(Math.random() * CONFETTI_COLS.length) | 0],
+      });
+    }
+  }
+
+  updateConfetti(dt) {
+    const parts = this.confettiParts;
+    if (!parts.length) {
+      if (this.confetti.visible) { this.confetti.visible = false; this.confetti.count = 0; }
+      return;
+    }
+    const d = this.confettiDummy, c = this.confettiCol;
+    const drag = Math.pow(0.52, dt);     // scraps shed sideways speed fast
+    let n = 0;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.life -= dt;
+      if (p.life <= 0) { parts.splice(i, 1); continue; }
+      p.vy -= 120 * dt;                  // gravity, lightened: paper floats
+      p.vx *= drag; p.vz *= drag;
+      p.vy *= Math.pow(0.80, dt);
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      p.rx += p.sx * dt; p.ry += p.sy * dt; p.rz += p.sz * dt;
+      if (n >= CONFETTI_MAX) continue;
+      const fade = Math.min(1, p.life / 0.5);   // shrink out rather than pop
+      d.position.set(p.x, p.y, p.z);
+      d.rotation.set(p.rx, p.ry, p.rz);
+      d.scale.set(p.w * fade, p.h * fade, 1);
+      d.updateMatrix();
+      this.confetti.setMatrixAt(n, d.matrix);
+      this.confetti.setColorAt(n, c.setHex(p.col));
+      n++;
+    }
+    this.confetti.count = n;
+    this.confetti.visible = n > 0;
+    this.confetti.instanceMatrix.needsUpdate = true;
+    if (this.confetti.instanceColor) this.confetti.instanceColor.needsUpdate = true;
+  }
+
+  // --- the arrival ---------------------------------------------------------
+  // Lifts the llama out of the crew seat into world space. The boat keeps
+  // bobbing on the swell underneath; the llama no longer rides it.
+  startCheer(session, t) {
+    const level = session.level;
+    const b = riverBounds(level, level.length);
+    const spot = new THREE.Vector3(b.center - HALF, DECK_TOP, -level.length - DOCK_Z_INSET);
+    const crew = this.boat.userData.crew;
+    const llama = crew.children[0] || null;
+    const from = new THREE.Vector3();
+    let home = 0, height = 46;
+
+    if (llama) {
+      this.boat.updateWorldMatrix(true, true);
+      llama.getWorldPosition(from);
+      this.cheerHome = { parent: crew, position: llama.position.clone(), rotation: llama.rotation.clone() };
+      this.cheerGroup.add(llama);        // three drops it from the crew group
+
+      // Both llamas ride the boat turned to face the bow, so a half turn off
+      // whatever that resting yaw is points either of them at the camera.
+      home = this.cheerHome.rotation.y;
+      // Measure the facing pose at the origin: how far the hooves hang below
+      // the model's own origin is what puts them on the planks, and the
+      // height is what the camera has to frame.
+      llama.position.set(0, 0, 0);
+      llama.rotation.set(0, home - Math.PI, 0);
+      llama.updateWorldMatrix(true, true);
+      const bb = new THREE.Box3().setFromObject(llama);
+      spot.y = DECK_TOP - bb.min.y;
+      height = bb.max.y - bb.min.y;
+      llama.position.copy(from);
+      llama.rotation.copy(this.cheerHome.rotation);
+    }
+    // Forelegs back to rest: there is no oar to hold out here.
+    if (this.armUniforms) { this.armUniforms.uArm.value = 0; this.armUniforms.uReach.value = 1; }
+    this.cheer = { t0: t, llama, from, spot, home, height, popped: 0 };
+  }
+
+  updateCheer(session, t) {
+    const c = this.cheer;
+    const e = t - c.t0;
+    const landed = CHEER.settle + CHEER.hop;
+    const llama = c.llama;
+
+    if (llama) {
+      const hop = Math.min(1, Math.max(0, (e - CHEER.settle) / CHEER.hop));
+      const k = hop * hop * (3 - 2 * hop);
+      llama.position.lerpVectors(c.from, c.spot, k);
+      llama.position.y += Math.sin(Math.PI * hop) * 30;   // the arc of the jump
+      // The model is built facing +Z and rides the boat turned a half turn to
+      // face the bow, so unwinding that turn is exactly facing the camera.
+      llama.rotation.set(0, c.home - Math.PI * k, 0);
+      if (hop >= 1) {
+        const beat = Math.abs(Math.sin((e - landed) * 7.5));
+        llama.position.y = c.spot.y + beat * 6;
+        llama.rotation.x = -beat * 0.16;                  // rears up on the hop
+        llama.rotation.z = Math.sin((e - landed) * 7.5) * 0.09;
+      }
+    }
+
+    if (c.popped < 1 && e >= landed) {
+      this.spawnConfetti(c.spot, 170, 1);
+      c.popped = 1;
+      if (session.sfx && session.sfx.pop) session.sfx.pop();
+    } else if (c.popped < 2 && e >= landed + CHEER.second) {
+      this.spawnConfetti(c.spot, 110, 0.82);
+      c.popped = 2;
+      if (session.sfx && session.sfx.pop) session.sfx.pop();
+    }
+  }
+
+  // Puts the llama back in its seat. Called whenever a level goes away, so a
+  // replay starts with a crewed boat rather than an empty one.
+  endCheer() {
+    const c = this.cheer;
+    if (c && c.llama && this.cheerHome) {
+      this.cheerHome.parent.add(c.llama);
+      c.llama.position.copy(this.cheerHome.position);
+      c.llama.rotation.copy(this.cheerHome.rotation);
+    }
+    this.cheer = null;
+    this.cheerHome = null;
+    if (this.confettiParts) this.confettiParts.length = 0;
+    if (this.confetti) { this.confetti.count = 0; this.confetti.visible = false; }
   }
 
   updateParticles(session, t) {
@@ -791,6 +995,7 @@ export class Renderer3D {
   }
 
   disposeLevel() {
+    this.endCheer();
     this.mixers = [];
     this.sharkSwimmers = [];
     if (!this.levelGroup) return;
@@ -822,8 +1027,18 @@ export class Renderer3D {
     const slope = (hBow - hStern) / (HULL_HALF * 2);
     this.boat.position.set(bx, h + 2, bz);
     this.boat.rotation.set(Math.atan(slope) * 0.8, -b.lean * 0.3, -b.lean * 0.45);
-    this.boat.visible = !(b.invuln > 0 && Math.floor(t * 14) % 2 === 0);
-    this.boat.userData.rig(t, session.status === 'won', b.lean);
+    // The invulnerability flicker is suppressed on arrival -- blinking through
+    // the celebration looks like a bug.
+    this.boat.visible = session.status === 'won' || !(b.invuln > 0 && Math.floor(t * 14) % 2 === 0);
+
+    if (session.status === 'won' && !this.cheer) this.startCheer(session, t);
+    if (this.cheer) {
+      // Oars held where the stroke left them, crew seat empty.
+      this.boat.userData.rig(this.cheer.t0, false, 0, true);
+      this.updateCheer(session, t);
+    } else {
+      this.boat.userData.rig(t, false, b.lean);
+    }
 
     for (const { o, mesh } of this.whaleMeshes) {
       mesh.position.x = o.x - HALF;
@@ -838,6 +1053,7 @@ export class Renderer3D {
     this.updateMixers(dt);
 
     this.updateParticles(session, t);
+    this.updateConfetti(dt);
 
     // Chase camera. It tracks the boat laterally, so whatever is near your lane
     // stays on screen; it stops at the dock so the arrival is visible.
@@ -845,13 +1061,24 @@ export class Renderer3D {
     const centre = riverBounds(level, b.y).center - HALF;
     const camX = bx + (centre - bx) * 0.25;
     const want = new THREE.Vector3(camX, CAM_UP + h * 0.4, -followY + CAM_BACK);
+    let cheerCam = null;
+    if (this.cheer) {
+      // Drop in close and level off: the llama is the subject now, and from
+      // the chase height it would be a speck at the foot of the frame.
+      const spot = this.cheer.spot;
+      cheerCam = this.cheerCam();
+      want.set(spot.x, spot.y + 30, spot.z + cheerCam.dist);
+    }
     const k = 1 - Math.exp(-7 * dt);
     this.camera.position.lerp(want, k);
     if (session.shake > 0) {
       this.camera.position.x += (Math.random() - 0.5) * session.shake * 0.9;
       this.camera.position.y += (Math.random() - 0.5) * session.shake * 0.9;
     }
-    this.camLook.lerp(new THREE.Vector3(camX * 0.6, LOOK_UP, -followY - LOOK_AHEAD), k);
+    const lookAt = cheerCam
+      ? new THREE.Vector3(this.cheer.spot.x, cheerCam.lookY, this.cheer.spot.z)
+      : new THREE.Vector3(camX * 0.6, LOOK_UP, -followY - LOOK_AHEAD);
+    this.camLook.lerp(lookAt, k);
     this.camera.lookAt(this.camLook);
 
     this.updateWater(this.camera.position.x, this.camera.position.z, t);
@@ -867,6 +1094,25 @@ export class Renderer3D {
     this.progressDot.style.bottom = pct;
 
     this.renderer.render(this.scene, this.camera);
+  }
+
+  // How to hold the camera during the arrival. While the view is clear the
+  // llama is centred and close. Once the results panel slides up it has to
+  // move into the strip the panel leaves free -- which means backing off far
+  // enough to fit that strip as well as aiming at it, the same solve
+  // frameMenuBoat does for the boat on the title screen.
+  cheerCam() {
+    const spot = this.cheer.spot;
+    const tanHalf = Math.tan((this.camera.fov / 2) * Math.PI / 180);
+    if (!document.querySelector('.screen.active.dim')) {
+      return { dist: CHEER_CAM_BACK, lookY: spot.y + 4 };
+    }
+    const clear = this.menuClearNdc();
+    const band = Math.max(0.24, clear + 1);
+    const wantHeight = Math.min(band * 0.60, 0.36);
+    const dist = Math.max(CHEER_CAM_BACK, Math.min(640, this.cheer.height / (wantHeight * tanHalf)));
+    const targetNdc = (clear - 1) / 2;                    // middle of the strip
+    return { dist, lookY: spot.y - targetNdc * dist * tanHalf };
   }
 
   // How far down the screen the active menu's controls reach, in NDC.
@@ -929,7 +1175,10 @@ export class Renderer3D {
   }
 
   renderBackdrop(t) {
+    const dt = Math.min(0.05, Math.max(0, t - this.lastT));
     this.lastT = t;
+    if (this.cheer) this.endCheer();
+    this.updateConfetti(dt);
     this.setRiverShape(MENU_RIVER);
     if (this.levelGroup) this.levelGroup.visible = false;
     this.menuGroup.visible = true;
@@ -1416,12 +1665,13 @@ function makeLlamaBoat() {
   g.userData.crew = crew;
   g.userData.liven = liven;
 
-  g.userData.rig = (t, celebrating, lean = 0) => {
+  g.userData.rig = (t, celebrating, lean = 0, crewFree = false) => {
     const sw = Math.sin(t * (celebrating ? 9 : 4.4));
     for (const { oar, side } of oars) {
       oar.rotation.x = sw * 0.5;
       oar.rotation.z = side * sw * 0.12;
     }
+    if (crewFree) return;
     crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
     g.userData.liven(t, celebrating);
   };
