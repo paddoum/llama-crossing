@@ -18,7 +18,9 @@ The wordmark is the app's own `AppLogo`: "Explorer Quest" in condensed uppercase
 
 The course is open sea, not a canal. Paired buoys stand where the banks used to — magenta to port, gold to starboard — so the channel the boat is *clamped* to is the one the player can actually see; low land sits far out on both beams to give the eye something to measure speed against, which bare water does not. Hazards are **sharks** (spit drives them off) and **whales** (drifting, solid), plus reefs and whirlpools.
 
-Two colours are set for legibility rather than taste, and both were measured against the rendered sea: the whales are `#3d7ba6` because at their natural `#16426a` they were within a few luminance points of the water and effectively invisible, and the sharks carry an emissive lift so they hold their azure in shadow. Measured contrast against the sea: whales +44, sharks +48.
+Three colours are set for legibility rather than taste, and all three were measured against the rendered sea: the whales are `#3d7ba6` because at their natural `#16426a` they were within a few luminance points of the water and effectively invisible; the sharks carry an emissive lift so they hold their azure in shadow; and the reefs are **marron**, `#8c5a30`, with a warm emissive.
+
+The reefs are the one warm hue in the scene, and deliberately so. At their old `#16436b` they sat 14 luminance points off the water beside them with a red-minus-blue gap of **+6** — the same hue as the sea, so they read as texture rather than as something to steer around. At `#8c5a30` that gap is **+71** (reef +22, water −49): nothing else on screen is warm, so a reef cannot be mistaken for a wave. Measured contrast against the sea: whales +44, sharks +48, reefs +23 luma and +71 hue.
 
 
 A mobile-first web game: a llama rows from **A** to **B**, dodging rocks, drifting logs and whirlpools, and spitting at the viruses floating in the river. No build step and no image assets -- everything is drawn in code.

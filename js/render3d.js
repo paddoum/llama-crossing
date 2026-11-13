@@ -18,7 +18,10 @@ const COL = {
 
   seaDeep: 0x021a3b, seaShallow: 0x07557a, foam: 0xbfe9f7,
   land: 0x12365c, landHigh: 0x1b4a76,
-  reef: 0x16436b, reefLight: 0x2b668f,
+  // Marron. The reefs used to be two blues a shade off the sea, which read as
+  // texture rather than as something to steer around -- a warm hue is the one
+  // break the whole scene does not otherwise contain.
+  reef: 0x8c5a30, reefLight: 0xbf8749,
   shark: 0x1884c6, sharkBelly: 0xdbeef8,
   whale: 0x3d7ba6, whaleBelly: 0xdceef7,
   hull: 0xa35f2a, hullDark: 0x6e3d15, deck: 0xc98a4b, mast: 0x8a6136,
@@ -33,7 +36,8 @@ const mat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatSh
 const M = {
   land: mat(COL.land, { side: THREE.DoubleSide }),
   landHigh: mat(COL.landHigh, { side: THREE.DoubleSide }),
-  reef: mat(COL.reef),
+  // A little emissive so a reef on the shadow side of a wave still reads.
+  reef: mat(COL.reef, { emissive: 0x3a2008 }),
   reefLight: mat(COL.reefLight),
   whale: mat(COL.whale),
   whaleBelly: mat(COL.whaleBelly),
