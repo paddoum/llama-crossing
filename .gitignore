@@ -1,2 +1,5 @@
 .DS_Store
 Thumbs.db
+
+# Mixamo exports: derived from assets/llama.glb, rebuild with tools/glb_to_fbx.py
+*.fbx

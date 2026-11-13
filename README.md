@@ -283,6 +283,29 @@ it.
 `state.js` asks the renderer how long to wait (`renderer.winDelay`), so the 2D
 build keeps its old 1.1s and is untouched by any of this.
 
+### The feet
+
+Two bugs put the hooves in the wrong place, both found by measuring rather
+than by looking.
+
+**The shader was bending them.** `armWeight` asked "below the shoulder and
+forward of it", which is the right question for a llama with its forelegs
+hanging down — but this one sits with them tucked at the chest, so the test
+also caught the front of the hind hooves. Of the 4291 vertices it moved, 1939
+were in the bottom quarter of the model. At rowing angles that is invisible;
+once the dance drives `uArm` a full radian the hooves swing with it. The
+model leaves a clean dead band between the hooves and the forelegs — at glTF
+y −0.76..−0.57 almost nothing is weighted — so `ARM.lowY` cuts the weight off
+inside it. The bottom band now measures 0 moved vertices, mean weight 0.000.
+
+**The squash was lifting them.** Scale pivots on the model's origin, which
+sits mid-body, so squashing it on the landing also pulled the hooves up off
+the planks. The dance now drops the body by exactly what the legs lose
+(`c.feet * sq`). Leaning at full tilt on the touchdown drove the downhill
+hoof 0.7 units through the planks, so the sway is scaled by how airborne it
+is. Measured over a full loop: hooves travel 16.19..24.13 against a deck at
+16.40 — they plant within 0.2 and clear it by 7.7.
+
 ### Cotillons
 
 An `InstancedMesh` of 300 unlit quads with per-instance colour, a third of
@@ -291,6 +314,40 @@ them long and thin so they read as streamers. Sizes are deliberately small
 out, so anything above about 2.5 units fills the sky with playing cards.
 Gravity is lightened to 120 and vertical speed is damped, because paper
 floats — at full gravity they are gone before the results screen.
+
+## Rigging the llama elsewhere (Mixamo)
+
+`assets/llama.glb` has **no skeleton**: one mesh, one node, `skins: 0`,
+`animations: []`, no `JOINTS_0`. Nothing a canned clip can drive, which is
+why the dance is procedural.
+
+To rig it in Mixamo, `tools/glb_to_fbx.py` produces an upload-ready FBX
+(Blender required, no add-ons):
+
+```
+/Applications/Blender.app/Contents/MacOS/Blender --background \
+  --python tools/glb_to_fbx.py -- assets/llama.glb llama-mixamo.fbx
+```
+
+It does three things Mixamo needs:
+
+- **Welds the mesh.** The source is triangle soup — every triangle carries
+  its own copies of its corners — so it imports as **11,609 disconnected
+  shells with 53,501 of 73,879 edges non-manifold**. The auto-rigger walks a
+  connected surface to find limbs, and would have nothing to walk. After
+  welding at 1e-4: **1 shell, 39 non-manifold edges of 47,133**, 54,069
+  vertices down to 15,708, all 31,419 faces intact.
+- **Scales to 1.7 m**, which keeps the auto-rigger's marker placement sane.
+- **Embeds the texture** and exports binary FBX 7400, Y-up / −Z-forward.
+
+The stance is in its favour: from 2% to 20% of its height the mesh has
+exactly two islands, at x ±0.17 and well apart, so it reads as a biped
+standing on two legs — which is the shape the auto-rigger expects. Exports
+are gitignored; rebuild rather than commit them.
+
+If a rigged FBX comes back, wiring it up is the `AnimationMixer` path the
+sharks and whales already use, and the shader foreleg bend stops being
+needed.
 
 ## Verifying the 3D build
 

@@ -315,7 +315,17 @@ const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 15.0;
 // the vertex shader: vertices below the shoulder and forward of it rotate
 // about the shoulder, weighted so it bends rather than shearing off. They
 // also shorten, because the leg is twice as long as the reach to the oar.
-const ARM = { shoulderY: -0.18, shoulderZ: 0.08, falloff: 0.30, restY: -0.90, restZ: 0.09 };
+// lowY/lowFade cut the weight off below the forelegs. Without it the test
+// "below the shoulder and forward of it" also catches the front of the hind
+// hooves -- measured, 1939 of the 4291 moved vertices were down there -- and
+// they swung with the oar. Invisible at rowing angles, obvious once the
+// dance drives uArm a full radian. The model leaves a clean dead band at
+// y -0.76..-0.57 between the hooves and the forelegs; the cut sits in it.
+const ARM = {
+  shoulderY: -0.18, shoulderZ: 0.08, falloff: 0.30,
+  lowY: -0.62, lowFade: 0.16,
+  restY: -0.90, restZ: 0.09,
+};
 
 // Sculpted rowboat. Modelled Y-up with the bow at +X, so it gets a quarter
 // turn to point down-river. The oars are separate nodes, so they can row.
@@ -466,6 +476,7 @@ export class Renderer3D {
             uniform float uReach;
             float armWeight(vec3 p) {
               return smoothstep(${ARM.shoulderY.toFixed(3)}, ${(ARM.shoulderY - ARM.falloff).toFixed(3)}, p.y)
+                   * smoothstep(${(ARM.lowY - ARM.lowFade).toFixed(3)}, ${ARM.lowY.toFixed(3)}, p.y)
                    * smoothstep(-0.02, 0.06, p.z);
             }
             // uArm swings both forelegs together -- that is the rowing pose.
@@ -842,7 +853,11 @@ export class Renderer3D {
     }
     // Forelegs back to rest: there is no oar to hold out here.
     if (this.armUniforms) { this.armUniforms.uArm.value = 0; this.armUniforms.uReach.value = 1; }
-    this.cheer = { t0: t, llama, from, spot, home, height, popped: 0, scale: llama ? llama.scale.x : 1 };
+    this.cheer = {
+      t0: t, llama, from, spot, home, height, popped: 0,
+      scale: llama ? llama.scale.x : 1,
+      feet: spot.y - DECK_TOP,     // origin to hooves: the squash pivots here
+    };
   }
 
   updateCheer(session, t) {
@@ -880,18 +895,24 @@ export class Renderer3D {
     const half = ph * 0.5;                       // the step takes two beats
     const up = Math.abs(Math.sin(ph));           // 0 on the beat, 1 at the top
 
+    // Wide and short as it lands, tall and thin at the top of the hop.
+    const sq = (0.5 - up) * 2 * DANCE.squash;
+    // Scale pivots on the model's origin, which sits mid-body -- so squashing
+    // it also lifts the hooves off the planks. Drop the body by the same
+    // amount the legs shrink and the feet stay planted.
     llama.position.set(
       c.spot.x + Math.sin(half) * DANCE.step,
-      c.spot.y + up * DANCE.hop,
+      c.spot.y + up * DANCE.hop - c.feet * sq,
       c.spot.z,
     );
     llama.rotation.set(
       -up * DANCE.nod,
       c.home - Math.PI + Math.sin(half) * DANCE.twist,
-      Math.sin(half + 1.1) * DANCE.sway,
+      // Lean mostly while it is in the air. A full lean at touchdown tips the
+      // body about its mid-point and drives the downhill hoof through the
+      // planks -- measured at 0.7 units; this keeps it under 0.3.
+      Math.sin(half + 1.1) * DANCE.sway * (0.35 + 0.65 * up),
     );
-    // Wide and short as it lands, tall and thin at the top of the hop.
-    const sq = (0.5 - up) * 2 * DANCE.squash;
     llama.scale.set(c.scale * (1 + sq), c.scale * (1 - sq), c.scale * (1 + sq));
 
     if (this.armUniforms) {
