@@ -334,13 +334,32 @@ const CHEER = {
   settle: 0.45,   // oars stowed, the boat coasts the last of it
   hop: 0.70,      // the arc out of the boat and onto the planks
   second: 0.80,   // a second, smaller pop after the first
-  total: 3.1,     // when state.js is allowed to put the results screen up
+  total: 3.5,     // when state.js is allowed to put the results screen up
 };
 // Top of the dock planks (buildDock). How far the llama's hooves sit below
 // its own origin is measured at the time, because the sculpted model and the
 // code-built stand-in it falls back to are different shapes.
 const DECK_TOP = 16.4;
 const DOCK_Z_INSET = 19;        // buildDock lays the deck this far past the line
+
+// The dance on the dock. The llama is one static mesh with no skeleton, so
+// there is nothing for a canned clip to drive: every move here is the whole
+// object plus the two foreleg uniforms the rowing shader already provides.
+// Squash goes with the landing and stretch with the hop, which is what sells
+// weight on a model that cannot bend anywhere else.
+const DANCE = {
+  bpm: 126,
+  hop: 9,            // how far each beat lifts it off the planks
+  squash: 0.085,
+  step: 6,           // side to side, every other beat
+  twist: 0.50,
+  sway: 0.16,
+  nod: 0.11,
+  armMid: -0.62,     // negative swings the forelegs up and forward
+  armSwing: 0.40,
+  armSplit: 0.58,    // one up, one down
+  armReach: 0.86,    // shortened a little: reads as a bent elbow
+};
 
 // Cotillons. Flat scraps on ballistic arcs that tumble as they fall --
 // a third of them long and thin, which reads as streamers.
@@ -428,38 +447,47 @@ export class Renderer3D {
   loadLlama() {
     new GLTFLoader().load(LLAMA_URL, (gltf) => {
       const model = gltf.scene;
-      this.armUniforms = { uArm: { value: 0 }, uReach: { value: 1 } };
+      this.armUniforms = { uArm: { value: 0 }, uArmSplit: { value: 0 }, uReach: { value: 1 } };
       model.traverse((o) => {
         if (!o.isMesh) return;
         // Lambert to match the rest of the scene's lighting, keeping the map.
         o.material = new THREE.MeshLambertMaterial({ map: o.material.map, side: THREE.DoubleSide });
         o.material.onBeforeCompile = (shader) => {
           shader.uniforms.uArm = this.armUniforms.uArm;
+          shader.uniforms.uArmSplit = this.armUniforms.uArmSplit;
           shader.uniforms.uReach = this.armUniforms.uReach;
           shader.vertexShader = `
             uniform float uArm;
+            uniform float uArmSplit;
             uniform float uReach;
             float armWeight(vec3 p) {
               return smoothstep(${ARM.shoulderY.toFixed(3)}, ${(ARM.shoulderY - ARM.falloff).toFixed(3)}, p.y)
                    * smoothstep(-0.02, 0.06, p.z);
             }
+            // uArm swings both forelegs together -- that is the rowing pose.
+            // uArmSplit adds an opposite angle on each side of the midline,
+            // which is what lets one leg go up while the other comes down.
+            // Blended across a narrow band so the chest does not tear.
+            float armAngle(vec3 p, float w) {
+              return (uArm + uArmSplit * clamp(p.x * 18.0, -1.0, 1.0)) * w;
+            }
             vec3 armBend(vec3 p, float w) {
               vec3 pivot = vec3(p.x, ${ARM.shoulderY.toFixed(3)}, ${ARM.shoulderZ.toFixed(3)});
               vec3 rel = p - pivot;
-              float a = uArm * w;
+              float a = armAngle(p, w);
               float c = cos(a), s = sin(a);
               vec3 rot = vec3(rel.x, rel.y * c - rel.z * s, rel.y * s + rel.z * c);
               return pivot + rot * (1.0 - (1.0 - uReach) * w);
             }
-            vec3 armRotate(vec3 v, float w) {
-              float a = uArm * w;
+            vec3 armRotate(vec3 v, vec3 p, float w) {
+              float a = armAngle(p, w);
               float c = cos(a), s = sin(a);
               return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
             }
           ` + shader.vertexShader;
           shader.vertexShader = shader.vertexShader
             .replace('#include <beginnormal_vertex>',
-              '#include <beginnormal_vertex>\n  objectNormal = armRotate(objectNormal, armWeight(position));')
+              '#include <beginnormal_vertex>\n  objectNormal = armRotate(objectNormal, position, armWeight(position));')
             .replace('#include <begin_vertex>',
               '#include <begin_vertex>\n  transformed = armBend(transformed, armWeight(position));');
         };
@@ -632,6 +660,7 @@ export class Renderer3D {
     const angle = Math.atan2(relZ, relY) - Math.atan2(restZ, restY);
     const reach = Math.hypot(relY, relZ) / Math.hypot(restY, restZ);
     this.armUniforms.uArm.value = angle;
+    this.armUniforms.uArmSplit.value = 0;      // both forelegs on the one oar
     this.armUniforms.uReach.value = Math.max(0.25, Math.min(1, reach));
   }
 
@@ -809,7 +838,7 @@ export class Renderer3D {
     }
     // Forelegs back to rest: there is no oar to hold out here.
     if (this.armUniforms) { this.armUniforms.uArm.value = 0; this.armUniforms.uReach.value = 1; }
-    this.cheer = { t0: t, llama, from, spot, home, height, popped: 0 };
+    this.cheer = { t0: t, llama, from, spot, home, height, popped: 0, scale: llama ? llama.scale.x : 1 };
   }
 
   updateCheer(session, t) {
@@ -826,12 +855,7 @@ export class Renderer3D {
       // The model is built facing +Z and rides the boat turned a half turn to
       // face the bow, so unwinding that turn is exactly facing the camera.
       llama.rotation.set(0, c.home - Math.PI * k, 0);
-      if (hop >= 1) {
-        const beat = Math.abs(Math.sin((e - landed) * 7.5));
-        llama.position.y = c.spot.y + beat * 6;
-        llama.rotation.x = -beat * 0.16;                  // rears up on the hop
-        llama.rotation.z = Math.sin((e - landed) * 7.5) * 0.09;
-      }
+      if (hop >= 1) this.dance(c, e - landed);
     }
 
     if (c.popped < 1 && e >= landed) {
@@ -845,6 +869,35 @@ export class Renderer3D {
     }
   }
 
+  // Four-to-the-floor on the planks. `d` is seconds since the hooves landed.
+  dance(c, d) {
+    const llama = c.llama;
+    const ph = d * (DANCE.bpm / 60) * Math.PI * 2;
+    const half = ph * 0.5;                       // the step takes two beats
+    const up = Math.abs(Math.sin(ph));           // 0 on the beat, 1 at the top
+
+    llama.position.set(
+      c.spot.x + Math.sin(half) * DANCE.step,
+      c.spot.y + up * DANCE.hop,
+      c.spot.z,
+    );
+    llama.rotation.set(
+      -up * DANCE.nod,
+      c.home - Math.PI + Math.sin(half) * DANCE.twist,
+      Math.sin(half + 1.1) * DANCE.sway,
+    );
+    // Wide and short as it lands, tall and thin at the top of the hop.
+    const sq = (0.5 - up) * 2 * DANCE.squash;
+    llama.scale.set(c.scale * (1 + sq), c.scale * (1 - sq), c.scale * (1 + sq));
+
+    if (this.armUniforms) {
+      const swing = Math.sin(ph);
+      this.armUniforms.uArm.value = DANCE.armMid + swing * DANCE.armSwing;
+      this.armUniforms.uArmSplit.value = swing * DANCE.armSplit;
+      this.armUniforms.uReach.value = DANCE.armReach;
+    }
+  }
+
   // Puts the llama back in its seat. Called whenever a level goes away, so a
   // replay starts with a crewed boat rather than an empty one.
   endCheer() {
@@ -853,6 +906,12 @@ export class Renderer3D {
       this.cheerHome.parent.add(c.llama);
       c.llama.position.copy(this.cheerHome.position);
       c.llama.rotation.copy(this.cheerHome.rotation);
+      c.llama.scale.setScalar(c.scale);          // undo the squash
+    }
+    if (this.armUniforms) {
+      this.armUniforms.uArm.value = 0;
+      this.armUniforms.uArmSplit.value = 0;
+      this.armUniforms.uReach.value = 1;
     }
     this.cheer = null;
     this.cheerHome = null;
