@@ -203,11 +203,20 @@ It took an earlier 15.6 MB / 327,648-triangle sailboat down to 0.22 MB / 9,630 t
 
 ## The llama model
 
-`assets/llama.glb` is a sculpted llama (single mesh, 31k triangles, one baked colour texture). It is fetched in the background: the code-built llama sails the boat until the model arrives, so a slow connection -- or a missing file -- never blocks the game. `js/render3d.js` swaps it into the boat's `crew` group on load.
+`assets/llama-rig.glb` is the llama: one rigged mesh with both of its Mixamo
+clips on it. It is fetched in the background, so a slow connection -- or a
+missing file -- never blocks the game; the code-built stand-in sails the boat
+until it arrives. See **The crew llama** below for how it is built and seated.
 
-The supplied file was 4.9 MB, 2.9 MB of which was a 2048x2048 JPEG for a llama about 150 px tall on screen. The texture is repacked at 1024 and the file is **2.26 MB**, now dominated by geometry rather than the image. If it needs to be smaller, the mesh is the thing to decimate.
+It ships at **2.16 MB**: a 1024 JPEG skin (0.27 MB) and 1.68 MB of skinned
+geometry, with the two clips only 0.17 MB between them. The texture was
+2048 and 3.45 MB of that file on its own; at the size the llama is actually
+drawn, 1024 is indistinguishable. Geometry is now the bulk, so decimating the
+mesh is the thing to try if it needs to be smaller still.
 
-Two things to know when swapping in a different model: it is modelled standing and facing **+Z**, so it is given a half turn to face the bow (−Z), and its legs drop through the hull and end below the waterline, where the opaque water hides them. `LLAMA_MODEL_SCALE` and `LLAMA_MODEL_Y` seat it.
+`assets/llama-anthro.glb` is the unrigged source the rig was made from. The
+game never loads it -- it is kept because `tools/mixamo_to_glb.py` takes the
+skin from it, Mixamo's own FBX having left the texture behind.
 
 The 2D build still draws its llama in code -- a GLB has nothing to render on a 2D canvas.
 
@@ -414,17 +423,21 @@ around an oar is gone, along with the hand-made dance — the rig does both now.
 
 ## Rigging the llama elsewhere (Mixamo)
 
-`assets/llama.glb` has **no skeleton**: one mesh, one node, `skins: 0`,
-`animations: []`, no `JOINTS_0`. Nothing a canned clip can drive, which is
-why the dance is procedural.
-
-To rig it in Mixamo, `tools/glb_to_fbx.py` produces an upload-ready FBX
-(Blender required, no add-ons):
+This is how the crew llama above was rigged, and it is what to do with any
+other model you want to put in the boat. `tools/glb_to_fbx.py` produces an
+upload-ready FBX (Blender required, no add-ons):
 
 ```
 /Applications/Blender.app/Contents/MacOS/Blender --background \
-  --python tools/glb_to_fbx.py -- assets/llama.glb llama-mixamo.fbx
+  --python tools/glb_to_fbx.py -- assets/llama-anthro.glb llama-mixamo.fbx
 ```
+
+Add `--tpose` for a model whose arms are not already out to the sides: it
+throws a temporary armature at the mesh, binds it with automatic weights,
+swings the arm chain onto the x axis and bakes the result. The sculpted llama
+that used to crew the boat needed it -- it stood with its forelegs tucked
+against its chest, hands almost touching, which gives an auto-rigger nothing
+to separate and gets you a rigged snowman.
 
 It does three things Mixamo needs:
 

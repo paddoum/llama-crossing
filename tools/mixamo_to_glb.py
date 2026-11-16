@@ -19,6 +19,10 @@ import bpy, sys, os
 
 argv = sys.argv[sys.argv.index('--') + 1:]
 skin, dst = argv[0], argv[1]
+# A 2048 skin is most of the file. 1024 is plenty at the size the llama is
+# drawn on a phone, and roughly quarters the bytes the player has to download.
+TEX = int(argv[argv.index('--texture') + 1]) if '--texture' in argv else 0
+JPEG = '--jpeg' in argv
 clips = []
 for i, a in enumerate(argv):
     if a == '--clip':
@@ -105,6 +109,12 @@ for mat in mesh.data.materials:
     bsdf.inputs['Roughness'].default_value = 0.85
     print(f'MAT     {mat.name!r} <- {texture.name!r}')
 
+if TEX and (texture.size[0] > TEX or texture.size[1] > TEX):
+    was = tuple(texture.size)
+    texture.scale(TEX, TEX)
+    texture.pack()                    # the exporter writes what is packed
+    print(f'TEXTURE {was[0]}x{was[1]} -> {texture.size[0]}x{texture.size[1]}')
+
 # 5. Stand the rest pose on the origin.
 #
 # Mixamo's native scale is left alone on purpose. Applying it rescales the
@@ -137,6 +147,7 @@ print(f'CENTRED x {lo[0]:+.3f}..{hi[0]:+.3f}  y {lo[1]:+.3f}..{hi[1]:+.3f}  z {l
 
 bpy.ops.export_scene.gltf(
     filepath=dst, export_format='GLB',
+    export_image_format='JPEG' if JPEG else 'AUTO',
     export_animations=True, export_force_sampling=True, export_nla_strips=True,
     export_skins=True, export_morph=False, export_apply=False,
     export_yup=True,
