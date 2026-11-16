@@ -19,12 +19,19 @@ export function makeRock(rng, left, right, y) {
   return { type: 'rock', x: rng.range(left + r, right - r), y, r, ext: r, seed: rng.next() };
 }
 
+// Whales take spit, but three of them: they are far too big to shift with one,
+// and making them cheap would turn every level into target practice.
+export const WHALE_HP = 3;
+
 export function makeWhale(rng, left, right, y) {
   const hl = rng.range(26, 48);
   const r = 9;
   return {
     type: 'whale', x: rng.range(left + hl + r, right - hl - r), y, hl, r, ext: hl + r,
     vx: rng.pick([-1, 1]) * rng.range(28, 62),
+    hp: WHALE_HP,
+    hurt: 0,          // seconds left on the flinch, for the renderers
+    dead: false,
     seed: rng.next(),
   };
 }

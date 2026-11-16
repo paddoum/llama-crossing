@@ -1,5 +1,6 @@
 // All canvas drawing. World → screen: sx = wx, sy = H - (wy - camY).
 import { LOGICAL_W, riverBounds } from './levels.js';
+import { WHALE_HP } from './entities.js';
 
 const C = {
   waterTop: '#3a9ad9', waterBot: '#2578b8', wave: 'rgba(255,255,255,0.20)',
@@ -29,7 +30,7 @@ export function renderSession(ctx, s, view, t) {
   for (const o of s.obstacles) if (o.type === 'whirlpool' && inView(o.y, camY, H, 80)) drawWhirlpool(ctx, o.x, toY(o.y), o, t);
   for (const v of s.sharks) if (!v.dead && inView(v.y, camY, H, 40)) drawShark(ctx, v.x, toY(v.y), v);
   for (const o of s.obstacles) {
-    if (!inView(o.y, camY, H, 80)) continue;
+    if (o.dead || !inView(o.y, camY, H, 80)) continue;
     if (o.type === 'rock') drawRock(ctx, o.x, toY(o.y), o, t);
     else if (o.type === 'whale') drawWhale(ctx, o.x, toY(o.y), o);
   }
@@ -224,6 +225,13 @@ function drawRock(ctx, x, y, o, t) {
 
 function drawWhale(ctx, x, y, o) {
   const w = o.hl, r = o.r;
+  // Each hit that lands sinks it further out of sight, which is how you tell
+  // the spit is doing anything at all to something this size.
+  const left = (o.hp === undefined ? WHALE_HP : o.hp) / WHALE_HP;
+  const shove = o.hurt > 0 ? Math.sin(o.hurt * 36) * 2.5 * (o.hurt / 0.45) : 0;
+  ctx.save();
+  ctx.globalAlpha = 0.35 + 0.65 * left;
+  ctx.translate(0, (1 - left) * r * 0.9 + shove);
   ctx.fillStyle = 'rgba(0,40,80,0.25)';
   ctx.beginPath(); ctx.roundRect(x - w - r, y - r + 3, (w + r) * 2, r * 2, r); ctx.fill();
   ctx.fillStyle = C.log;
@@ -239,6 +247,7 @@ function drawWhale(ctx, x, y, o) {
     ctx.fillStyle = C.logLight; ctx.beginPath(); ctx.arc(x + side * w, y, r - 2, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = C.logDark; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x + side * w, y, r - 5, 0, Math.PI * 2); ctx.stroke();
   }
+  ctx.restore();
 }
 
 function drawWhirlpool(ctx, x, y, o, t) {

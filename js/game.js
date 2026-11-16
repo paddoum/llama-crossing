@@ -1,7 +1,7 @@
 // One play-through of a level: entities, simulation, scoring.
 import { LEVELS, START_Y, generateLevel, riverBounds } from './levels.js';
 import { makeBoat, makeSpit } from './entities.js';
-import { updateWhale, boatHits, applyWhirlpool, clampToBanks, dist } from './physics.js';
+import { updateWhale, boatHits, applyWhirlpool, clampToBanks, dist, distToWhale } from './physics.js';
 
 const STEER_RATE = 11;     // how quickly boat.x follows targetX
 const KEY_SPEED = 300;     // units/s for keyboard steering
@@ -96,7 +96,8 @@ export class Session {
     this.pull = 0;
     const near = 220;
     for (const o of this.obstacles) {
-      if (Math.abs(o.y - boat.y) > near) continue;
+      if (o.dead || Math.abs(o.y - boat.y) > near) continue;
+      if (o.hurt > 0) o.hurt -= dt;
       if (o.type === 'whale') updateWhale(o, dt, level);
       if (o.type === 'whirlpool') {
         o.spin += dt * 3;
@@ -130,6 +131,14 @@ export class Session {
           this.burst(v, true);
           hit = true;
           break;
+        }
+      }
+      // Whales are long and thin, so the broad phase is wider than a shark's
+      // and the narrow phase measures to the capsule's spine, not its middle.
+      if (!hit) {
+        for (const o of this.obstacles) {
+          if (o.type !== 'whale' || o.dead || Math.abs(o.y - s.y) > 60) continue;
+          if (distToWhale(s.x, s.y, o) < s.r + o.r) { this.hitWhale(o); hit = true; break; }
         }
       }
       if (hit) this.spits.splice(i, 1);
@@ -166,6 +175,25 @@ export class Session {
       this.sfx.pop();
     }
     for (let i = 0; i < 12; i++) this.spawnParticle(v.x, v.y, 95, 0.55, bySpit ? '#8ef06a' : '#e0479e');
+  }
+
+  // Three hits drives a whale off. The first two only rock it and turn it
+  // around, which is the tell that the hits are landing -- that and the way it
+  // settles lower in the water each time (see the renderers).
+  hitWhale(o) {
+    o.hp--;
+    o.hurt = 0.45;
+    if (o.hp > 0) {
+      o.vx = -o.vx;
+      this.sfx.splash();
+      for (let i = 0; i < 9; i++) this.spawnParticle(o.x, o.y, 70, 0.4, '#8ef06a');
+      return;
+    }
+    o.dead = true;
+    this.sfx.pop();
+    for (let i = 0; i < 22; i++) {
+      this.spawnParticle(o.x + (Math.random() - 0.5) * o.hl * 1.8, o.y, 115, 0.75, i % 3 ? '#8ef06a' : '#dceef7');
+    }
   }
 
   takeHit(o) {

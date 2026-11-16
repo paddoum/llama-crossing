@@ -55,7 +55,16 @@ A tap is a press under 260 ms that moved less than 12 px, so steering never fire
 
 ## Scoring
 
-Three hearts per crossing. Rocks, logs, whirlpool cores and virus contact each cost one. Stars: one for finishing, one more for ending with 2+ hearts, one more for zapping 70%+ of the level's viruses.
+Three hearts per crossing. Reefs, whales, whirlpool cores and sharks each cost
+one on contact. Stars: one for finishing, one more for ending with 2+ hearts,
+one more for driving off 70%+ of the level's sharks.
+
+Spit drives a **shark** off in one hit. A **whale** takes **three** — it is far
+too big to shift with one, and making it cheaper would turn every level into
+target practice. The first two hits only rock it and turn it around, and each
+one settles it lower in the water, so you can see how close it is to going
+under before it does. Whales still do not count toward the third star; that is
+sharks only, so clearing a whale buys you a safer lane rather than points.
 
 ## Hosting
 

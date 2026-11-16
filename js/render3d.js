@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { LOGICAL_W, riverBounds, riverCenter } from './levels.js';
+import { WHALE_HP } from './entities.js';
 
 const HALF = LOGICAL_W / 2;
 const SKY = 0x1884c6;   // azure: the brand's lightest blue, so the horizon still reads
@@ -1062,7 +1063,7 @@ export class Renderer3D {
         } else {
           mesh = makeWhale(o);
         }
-        this.whaleMeshes.push({ o, mesh });
+        this.whaleMeshes.push({ o, mesh, baseY: mesh.position.y });
       }
       else { mesh = makeWhirlpool(o); this.swirlMeshes.push({ o, mesh }); }
       mesh.position.set(o.x - HALF, mesh.position.y, -o.y);
@@ -1138,9 +1139,15 @@ export class Renderer3D {
       this.boat.userData.rig(t, false, b.lean);
     }
 
-    for (const { o, mesh } of this.whaleMeshes) {
+    for (const { o, mesh, baseY } of this.whaleMeshes) {
+      mesh.visible = !o.dead;
+      if (o.dead) continue;
       mesh.position.x = o.x - HALF;
       mesh.rotation.y = o.vx < 0 ? Math.PI : 0;   // flukes trail the direction of travel
+      // Each hit that lands settles it lower in the water, so you can see how
+      // close it is to going under; a fresh one rolls as it turns away.
+      mesh.position.y = baseY - (WHALE_HP - o.hp) * o.r * 0.6;
+      mesh.rotation.z = o.hurt > 0 ? Math.sin(o.hurt * 36) * 0.22 * (o.hurt / 0.45) : 0;
     }
     for (const { o, mesh } of this.swirlMeshes) {
       mesh.rotation.y = -o.spin;
