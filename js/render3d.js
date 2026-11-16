@@ -306,11 +306,27 @@ const MENU_BOAT_H = 74, MENU_BOAT_MID = 29;
 // Sculpted llama. It is modelled standing and facing +Z, so it gets a half
 // turn to face the bow; the legs drop through the hull and finish below the
 // waterline, where the opaque water hides them.
-const LLAMA_URL = 'assets/llama.glb';
+
+// The crew: one rigged llama carrying both of its Mixamo clips, built by
+// tools/mixamo_to_glb.py. It paddles across and dances on the dock, so the
+// arrival only has to change which clip is playing. Its origin is between its
+// hooves and it stands 1.7 units tall, both guaranteed by the converter.
+const CREW = {
+  url: 'assets/llama-rig.glb',
+  paddle: /paddle/i,
+  dance: /dance/i,
+  height: 46,        // scaled to this, in world units, to match the boat
+  seatY: 3.0,        // where the hooves want to be, above the crew group
+  // glTF export turns Blender +Y into -Z, so the model arrives already facing
+  // the bow: no turn, unlike the sculpted llama this replaced. Unwinding half
+  // a turn at the dock then points it at the camera, which is what the arrival
+  // already does.
+  yaw: 0,
+  blend: 0.35,       // crossfade between the two clips
+};
 // Seated: dropped so the gunwale crosses above the legs, which puts the body
 // in the boat rather than standing over it. The legs run on through the hull
 // and finish under the waterline, where the opaque water hides them.
-const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 15.0;
 
 // The llama is one static mesh with no skeleton, so the forelegs are bent in
 // the vertex shader: vertices below the shoulder and forward of it rotate
@@ -322,11 +338,6 @@ const LLAMA_MODEL_SCALE = 24, LLAMA_MODEL_Y = 15.0;
 // they swung with the oar. Invisible at rowing angles, obvious once the
 // dance drives uArm a full radian. The model leaves a clean dead band at
 // y -0.76..-0.57 between the hooves and the forelegs; the cut sits in it.
-const ARM = {
-  shoulderY: -0.18, shoulderZ: 0.08, falloff: 0.30,
-  lowY: -0.62, lowFade: 0.16,
-  restY: -0.90, restZ: 0.09,
-};
 
 // Sculpted rowboat. Modelled Y-up with the bow at +X, so it gets a quarter
 // turn to point down-river. The oars are separate nodes, so they can row.
@@ -339,7 +350,12 @@ const SEA_LIFE = {
   buoy: { url: 'assets/buoy.glb', scale: 2.0 },
 };
 
-const ANIMATE_WITHIN = 900;   // only pose creatures this close to the boat
+const ANIMATE_WITHIN = 900;
+
+// Scratch for holdOar, which runs every frame.
+const _oarA = new THREE.Vector3(), _oarB = new THREE.Vector3();
+const _oarMid = new THREE.Vector3(), _oarDir = new THREE.Vector3();
+const _oarMat = new THREE.Matrix4(), _oarQ = new THREE.Quaternion();   // only pose creatures this close to the boat
 
 // --- the arrival --------------------------------------------------------
 // At the finish line the llama climbs out onto the dock, turns to face the
@@ -367,24 +383,6 @@ const DOCK_DEPTH = 34;
 const DOCK_MID = DOCK_FACE + DOCK_DEPTH / 2;
 const DOCK_LAND = DOCK_FACE + 10;              // where the llama puts its hooves
 
-// The dance on the dock. The llama is one static mesh with no skeleton, so
-// there is nothing for a canned clip to drive: every move here is the whole
-// object plus the two foreleg uniforms the rowing shader already provides.
-// Squash goes with the landing and stretch with the hop, which is what sells
-// weight on a model that cannot bend anywhere else.
-const DANCE = {
-  bpm: 126,
-  hop: 9,            // how far each beat lifts it off the planks
-  squash: 0.085,
-  step: 6,           // side to side, every other beat
-  twist: 0.50,
-  sway: 0.16,
-  nod: 0.11,
-  armMid: -0.62,     // negative swings the forelegs up and forward
-  armSwing: 0.40,
-  armSplit: 0.58,    // one up, one down
-  armReach: 0.86,    // shortened a little: reads as a bent elbow
-};
 
 // Cotillons. Flat scraps on ballistic arcs that tumble as they fall --
 // a third of them long and thin, which reads as streamers.
@@ -455,7 +453,7 @@ export class Renderer3D {
     this.menuLook = new THREE.Vector3(0, 12, -120);
     this.menuTip = new THREE.Vector3();
 
-    this.loadLlama();
+    this.loadCrew();
     this.loadBoat();
     this.loadSeaLife();
 
@@ -467,76 +465,175 @@ export class Renderer3D {
     this.progressDot = document.getElementById('progress-dot');
   }
 
-  // Loaded in the background: the built-in llama rows until this arrives, so
-  // a slow connection or a missing file never blocks the game.
-  loadLlama() {
-    new GLTFLoader().load(LLAMA_URL, (gltf) => {
-      const model = gltf.scene;
-      this.armUniforms = { uArm: { value: 0 }, uArmSplit: { value: 0 }, uReach: { value: 1 } };
-      model.traverse((o) => {
+  // Background-loaded: the built-in stand-in rows until this arrives, so a
+  // slow connection or a missing file never blocks the game.
+  loadCrew() {
+    new GLTFLoader().load(CREW.url, (gltf) => {
+      gltf.scene.traverse((o) => {
         if (!o.isMesh) return;
-        // Lambert to match the rest of the scene's lighting, keeping the map.
-        o.material = new THREE.MeshLambertMaterial({ map: o.material.map, side: THREE.DoubleSide });
-        o.material.onBeforeCompile = (shader) => {
-          shader.uniforms.uArm = this.armUniforms.uArm;
-          shader.uniforms.uArmSplit = this.armUniforms.uArmSplit;
-          shader.uniforms.uReach = this.armUniforms.uReach;
-          shader.vertexShader = `
-            uniform float uArm;
-            uniform float uArmSplit;
-            uniform float uReach;
-            float armWeight(vec3 p) {
-              return smoothstep(${ARM.shoulderY.toFixed(3)}, ${(ARM.shoulderY - ARM.falloff).toFixed(3)}, p.y)
-                   * smoothstep(${(ARM.lowY - ARM.lowFade).toFixed(3)}, ${ARM.lowY.toFixed(3)}, p.y)
-                   * smoothstep(-0.02, 0.06, p.z);
-            }
-            // uArm swings both forelegs together -- that is the rowing pose.
-            // uArmSplit adds an opposite angle on each side of the midline,
-            // which is what lets one leg go up while the other comes down.
-            // Blended across a narrow band so the chest does not tear.
-            float armAngle(vec3 p, float w) {
-              return (uArm + uArmSplit * clamp(p.x * 18.0, -1.0, 1.0)) * w;
-            }
-            vec3 armBend(vec3 p, float w) {
-              vec3 pivot = vec3(p.x, ${ARM.shoulderY.toFixed(3)}, ${ARM.shoulderZ.toFixed(3)});
-              vec3 rel = p - pivot;
-              float a = armAngle(p, w);
-              float c = cos(a), s = sin(a);
-              vec3 rot = vec3(rel.x, rel.y * c - rel.z * s, rel.y * s + rel.z * c);
-              return pivot + rot * (1.0 - (1.0 - uReach) * w);
-            }
-            vec3 armRotate(vec3 v, vec3 p, float w) {
-              float a = armAngle(p, w);
-              float c = cos(a), s = sin(a);
-              return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
-            }
-          ` + shader.vertexShader;
-          shader.vertexShader = shader.vertexShader
-            .replace('#include <beginnormal_vertex>',
-              '#include <beginnormal_vertex>\n  objectNormal = armRotate(objectNormal, position, armWeight(position));')
-            .replace('#include <begin_vertex>',
-              '#include <begin_vertex>\n  transformed = armBend(transformed, armWeight(position));');
-        };
-        o.frustumCulled = false;
+        // Lambert to sit in the same light as everything else, keeping the map.
+        o.material = new THREE.MeshLambertMaterial({ map: o.material.map });
+        o.frustumCulled = false;      // skinned bounds go stale as it moves
       });
-      model.rotation.y = Math.PI;                 // modelled facing +Z, bow is -Z
-      model.scale.setScalar(LLAMA_MODEL_SCALE);
-      model.position.y = LLAMA_MODEL_Y;
-      const crew = this.boat.userData.crew;
-      crew.clear();
-      crew.add(model);
-      // No rig in the model, so it just leans with the swell.
-      this.boat.userData.liven = (t, celebrating) => {
-        model.rotation.z = Math.sin(t * 0.9) * 0.03 + (celebrating ? Math.sin(t * 9) * 0.05 : 0);
-        model.rotation.y = Math.PI + Math.sin(t * 0.45) * 0.07;
+      const pick = (re) => gltf.animations.find((a) => re.test(a.name));
+      const paddle = pick(CREW.paddle), dance = pick(CREW.dance);
+      if (!paddle || !dance) {
+        console.warn('crew model is missing a clip; keeping the built-in llama.',
+          gltf.animations.map((a) => a.name));
+        return;
+      }
+      // Measure the GEOMETRY, not the object. Box3.setFromObject on a skinned
+      // mesh derives its bounds from the bones, which at load time have not
+      // been posed by any clip: it reported this model as 1.5 units tall at
+      // y 69, and acting on that put the llama 2109 units under the sea.
+      // The bind-pose geometry is what the converter centred, so trust that.
+      const box = new THREE.Box3();
+      gltf.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        o.geometry.computeBoundingBox();
+        box.union(o.geometry.boundingBox);
+      });
+      this.crewModel = {
+        gltf, paddle, dance,
+        height: box.max.y - box.min.y,
+        offset: new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2),
       };
-      this.llamaModel = model;
-    }, undefined, (err) => {
-      console.warn('Llama model failed to load; keeping the built-in one.', err);
-    });
+      this.seatCrew();
+    }, undefined, (err) => console.warn('crew model failed to load; keeping the built-in llama.', err));
   }
 
-  // Same background-load pattern as the llama: the code-built boat rows until
+  // Takes one of the boat's two oars out of its oarlock and gives it to the
+  // llama. Both loads race, so this is called from each and does nothing until
+  // the other has landed.
+  giveOar() {
+    if (!this.oars || !this.crewModel || this.crewHands) return;
+    const crew = this.boat.userData.crew.children[0];
+    if (!crew) return;
+    let mesh = null;
+    crew.traverse((o) => { if (o.isSkinnedMesh && !mesh) mesh = o; });
+    if (!mesh) return;
+    const left = mesh.skeleton.bones.find((b) => /LeftHand$/.test(b.name));
+    const right = mesh.skeleton.bones.find((b) => /RightHand$/.test(b.name));
+    if (!left || !right) return;
+
+    // One oar, not two: the clip is a two-handed paddle stroke.
+    const [keep, ...rest] = this.oars;
+    for (const { pivot } of rest) pivot.visible = false;
+    const oar = keep.oar;
+    this.boatModel.attach(oar);                 // out of the oarlock pivot
+    keep.pivot.visible = false;
+
+    // Which way the oar lies in its own space, and how long it is, so the
+    // shaft can be aimed down the line between the two hands.
+    const box = new THREE.Box3().setFromObject(oar);
+    const size = box.getSize(new THREE.Vector3());
+    const longest = size.x > size.y && size.x > size.z ? 'x' : (size.y > size.z ? 'y' : 'z');
+    const axis = new THREE.Vector3(longest === 'x' ? 1 : 0, longest === 'y' ? 1 : 0, longest === 'z' ? 1 : 0);
+    // The oar's own middle, so it pivots about the hands rather than an end.
+    const centre = box.getCenter(new THREE.Vector3());
+    oar.updateWorldMatrix(true, false);
+    this.crewHands = {
+      oar, left, right, axis,
+      centre: oar.worldToLocal(centre.clone()),
+      length: Math.max(size.x, size.y, size.z),
+    };
+    this.holdOar();
+  }
+
+  // Lays the oar along the line between the llama's hands, every frame, so it
+  // tracks whatever the clip is doing without any of it being hand-keyed.
+  holdOar() {
+    const h = this.crewHands;
+    if (!h) return;
+    const parent = h.oar.parent;
+    parent.updateWorldMatrix(true, false);
+    const a = h.left.getWorldPosition(_oarA);
+    const b = h.right.getWorldPosition(_oarB);
+    const mid = _oarMid.copy(a).add(b).multiplyScalar(0.5);
+    const dir = _oarDir.copy(b).sub(a);
+    if (dir.lengthSq() < 1e-8) return;          // hands together: leave it be
+    // Into the oar's parent frame: the midpoint as a point, the shaft
+    // direction as a direction, which must not pick up the translation.
+    parent.worldToLocal(mid);
+    _oarMat.copy(parent.matrixWorld).invert();
+    _oarQ.setFromRotationMatrix(_oarMat);
+    dir.applyQuaternion(_oarQ).normalize();
+    h.oar.quaternion.setFromUnitVectors(h.axis, dir);
+    h.oar.position.set(0, 0, 0);
+    h.oar.position.copy(mid).sub(_oarA.copy(h.centre).applyQuaternion(h.oar.quaternion));
+  }
+
+  // The lowest its feet get over one run of a clip, in the model's own units.
+  // Measured by stepping the mixer rather than assumed, because Mixamo clips
+  // do not agree with each other about where the floor is.
+  groundLift(model, mixer, action, others) {
+    let mesh = null;
+    model.traverse((o) => { if (o.isSkinnedMesh && !mesh) mesh = o; });
+    if (!mesh) return 0;
+    const feet = mesh.skeleton.bones.filter((b) => /Foot$|ToeBase$/.test(b.name));
+    if (!feet.length) return 0;
+    for (const a of others) a.stop();
+    action.reset().setEffectiveWeight(1).play();
+    const v = new THREE.Vector3();
+    let lo = Infinity;
+    const dur = action.getClip().duration;
+    for (let i = 0; i <= 24; i++) {
+      mixer.setTime((i / 24) * dur);
+      model.updateWorldMatrix(true, true);
+      for (const b of feet) { b.getWorldPosition(v); model.worldToLocal(v); lo = Math.min(lo, v.y); }
+    }
+    return Number.isFinite(lo) ? lo : 0;
+  }
+
+  // Puts the rigged llama in the boat with the paddling clip running. Called
+  // again after the arrival, so the next crossing starts with a crewed boat.
+  seatCrew() {
+    const d = this.crewModel;
+    if (!d) return null;
+    const inner = cloneSkinned(d.gltf.scene);
+    inner.position.sub(d.offset);            // hooves on the group's origin
+    const model = new THREE.Group();
+    model.add(inner);
+    model.scale.setScalar(CREW.height / d.height);
+    model.rotation.y = CREW.yaw;
+    model.position.y = CREW.seatY;
+    const crew = this.boat.userData.crew;
+    crew.clear();
+    crew.add(model);
+
+    const mixer = new THREE.AnimationMixer(inner);
+    const paddle = mixer.clipAction(d.paddle);
+    const dance = mixer.clipAction(d.dance);
+    model.userData.mixer = mixer;
+    model.userData.paddle = paddle;
+    model.userData.dance = dance;
+
+    // Neither clip stands the llama on the rig's origin -- the paddling one is
+    // a seated pose whose feet hang 25 units up -- so each clip is asked where
+    // its own feet are and the model is dropped by that much when it plays.
+    model.userData.lift = {
+      paddle: this.groundLift(model, mixer, paddle, [dance]),
+      dance: this.groundLift(model, mixer, dance, [paddle]),
+    };
+    // Both actions keep a base weight of 1: setEffectiveWeight(0) zeroes the
+    // base, and fadeIn then ramps a fade factor against it and stays at zero,
+    // which puts the llama on the dock in its bind T-pose. Use stop/play to
+    // pick which one runs and let the crossfade do the rest.
+    dance.setEffectiveWeight(1).stop();
+    paddle.reset().setEffectiveWeight(1).play();
+    mixer.setTime(0);
+    model.position.y = CREW.seatY - model.userData.lift.paddle * model.scale.x;
+    this.crewMixer = mixer;
+    this.crewHands = null;
+    this.giveOar();
+    // It is rigged now, so the swell only has to rock the whole body.
+    // (position.y is owned by the clip offset above, so liven leaves it alone.)
+    this.boat.userData.liven = (t, celebrating) => {
+      model.rotation.z = Math.sin(t * 0.9) * 0.03 + (celebrating ? Math.sin(t * 9) * 0.05 : 0);
+    };
+    return model;
+  }
+
   // the sculpted one arrives.
   // Sharks and whales are rigged and animated, so they are cloned per instance
   // with their own mixer rather than instanced -- skinning rules instancing
@@ -652,43 +749,34 @@ export class Renderer3D {
       boat.userData.rig = (t, celebrating, lean = 0, crewFree = false) => {
         const rate = celebrating ? 9 : 4.4;
         const sweep = Math.sin(t * rate), dip = Math.cos(t * rate);
-        for (const { pivot, side } of oars) {
-          // The oarlocks are on opposite sides, so the yaw has to mirror for
-          // the blades to sweep together instead of scissoring.
-          pivot.rotation.y = sweep * 0.52 * side;
-          pivot.rotation.x = dip * 0.30;          // blades lift on the recovery
+        // Once the rigged llama is aboard it holds the oar itself and the
+        // oarlock sweep is off: a hand-animated oar next to an animated
+        // paddler just reads as two things rowing out of time.
+        if (!this.crewHands) {
+          for (const { pivot, side } of oars) {
+            // The oarlocks are on opposite sides, so the yaw has to mirror for
+            // the blades to sweep together instead of scissoring.
+            pivot.rotation.y = sweep * 0.52 * side;
+            pivot.rotation.x = dip * 0.30;        // blades lift on the recovery
+          }
+        } else if (!crewFree) {
+          this.holdOar();
         }
+        // crewFree means the llama has climbed out: the oar stops tracking its
+        // hands and stays where the last stroke left it, lying in the boat.
         model.rotation.z = -lean * 0.12;
         if (crewFree) return;
-        if (held.length) this.reachForOar(held);
         boat.userData.crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
         boat.userData.liven(t, celebrating);
       };
       this.boatModel = model;
+      this.oars = oars;
+      this.giveOar();          // in case the crew got here first
     }, undefined, (err) => {
       console.warn('Boat model failed to load; keeping the built-in one.', err);
     });
   }
 
-  // Points the llama's forelegs at the oar handle. The model has no skeleton,
-  // so the shader bends the legs about the shoulder: this works out the angle
-  // and how far to shorten them, which is all that bend takes.
-  reachForOar(held) {
-    const llama = this.boat.userData.crew.children[0];
-    if (!this.armUniforms || !llama) return;
-    this.boat.updateMatrixWorld(true);
-    const p = new THREE.Vector3();
-    for (const h of held) p.add(h.obj.localToWorld(h.local.clone()));
-    p.multiplyScalar(1 / held.length);
-    llama.worldToLocal(p);
-    const relY = p.y - ARM.shoulderY, relZ = p.z - ARM.shoulderZ;
-    const restY = ARM.restY - ARM.shoulderY, restZ = ARM.restZ - ARM.shoulderZ;
-    const angle = Math.atan2(relZ, relY) - Math.atan2(restZ, restY);
-    const reach = Math.hypot(relY, relZ) / Math.hypot(restY, restZ);
-    this.armUniforms.uArm.value = angle;
-    this.armUniforms.uArmSplit.value = 0;      // both forelegs on the one oar
-    this.armUniforms.uReach.value = Math.max(0.25, Math.min(1, reach));
-  }
 
   resize(w, h, dpr) {
     this.renderer.setPixelRatio(dpr);
@@ -856,25 +944,38 @@ export class Renderer3D {
       llama.position.set(0, 0, 0);
       llama.rotation.set(0, home - Math.PI, 0);
       llama.updateWorldMatrix(true, true);
-      const bb = new THREE.Box3().setFromObject(llama);
-      spot.y = DECK_TOP - bb.min.y;
-      height = bb.max.y - bb.min.y;
+      // Same trap as in loadCrew: a skinned model's Box3 follows its bones,
+      // so the dock spot comes from what the model is known to be instead.
+      height = CREW.height;
+      spot.y = DECK_TOP;
       llama.position.copy(from);
       llama.rotation.copy(this.cheerHome.rotation);
     }
-    // Forelegs back to rest: there is no oar to hold out here.
-    if (this.armUniforms) { this.armUniforms.uArm.value = 0; this.armUniforms.uReach.value = 1; }
     this.cheer = {
       t0: t, llama, from, spot, home, height, popped: 0,
       sfx: session.sfx,            // endCheer has no session to ask for it
       scale: llama ? llama.scale.x : 1,
       feet: spot.y - DECK_TOP,     // origin to hooves: the squash pivots here
     };
+
+    // The rigged llama is the same llama that rowed, so the arrival only has
+    // to cross-fade it from paddling to dancing. Its origin is between its
+    // hooves, so it plants on the deck with no squash pivot to correct for.
+    const u = llama && llama.userData;
+    if (u && u.mixer) {
+      u.paddle.fadeOut(CREW.blend);
+      u.dance.reset().setEffectiveWeight(1).fadeIn(CREW.blend).play();
+      this.cheer.mixer = u.mixer;
+      this.cheer.feet = 0;
+      // Same correction as the seat, with the dance clip's own floor.
+      this.cheer.spot.y = DECK_TOP - (u.lift ? u.lift.dance : 0) * llama.scale.x;
+    }
   }
 
-  updateCheer(session, t) {
+  updateCheer(session, t, dt) {
     const c = this.cheer;
     const e = t - c.t0;
+    if (c.mixer) c.mixer.update(dt);     // the clip is the dance now
     const landed = CHEER.settle + CHEER.hop;
     const llama = c.llama;
 
@@ -886,7 +987,8 @@ export class Renderer3D {
       // The model is built facing +Z and rides the boat turned a half turn to
       // face the bow, so unwinding that turn is exactly facing the camera.
       llama.rotation.set(0, c.home - Math.PI * k, 0);
-      if (hop >= 1) this.dance(c, e - landed);
+      // Landed: pin it to the spot and let the clip do the rest.
+      if (hop >= 1) llama.position.copy(c.spot);
     }
 
     if (c.popped < 1 && e >= landed) {
@@ -902,40 +1004,6 @@ export class Renderer3D {
     }
   }
 
-  // Four-to-the-floor on the planks. `d` is seconds since the hooves landed.
-  dance(c, d) {
-    const llama = c.llama;
-    const ph = d * (DANCE.bpm / 60) * Math.PI * 2;
-    const half = ph * 0.5;                       // the step takes two beats
-    const up = Math.abs(Math.sin(ph));           // 0 on the beat, 1 at the top
-
-    // Wide and short as it lands, tall and thin at the top of the hop.
-    const sq = (0.5 - up) * 2 * DANCE.squash;
-    // Scale pivots on the model's origin, which sits mid-body -- so squashing
-    // it also lifts the hooves off the planks. Drop the body by the same
-    // amount the legs shrink and the feet stay planted.
-    llama.position.set(
-      c.spot.x + Math.sin(half) * DANCE.step,
-      c.spot.y + up * DANCE.hop - c.feet * sq,
-      c.spot.z,
-    );
-    llama.rotation.set(
-      -up * DANCE.nod,
-      c.home - Math.PI + Math.sin(half) * DANCE.twist,
-      // Lean mostly while it is in the air. A full lean at touchdown tips the
-      // body about its mid-point and drives the downhill hoof through the
-      // planks -- measured at 0.7 units; this keeps it under 0.3.
-      Math.sin(half + 1.1) * DANCE.sway * (0.35 + 0.65 * up),
-    );
-    llama.scale.set(c.scale * (1 + sq), c.scale * (1 - sq), c.scale * (1 + sq));
-
-    if (this.armUniforms) {
-      const swing = Math.sin(ph);
-      this.armUniforms.uArm.value = DANCE.armMid + swing * DANCE.armSwing;
-      this.armUniforms.uArmSplit.value = swing * DANCE.armSplit;
-      this.armUniforms.uReach.value = DANCE.armReach;
-    }
-  }
 
   // Puts the llama back in its seat. Called whenever a level goes away, so a
   // replay starts with a crewed boat rather than an empty one.
@@ -946,12 +1014,13 @@ export class Renderer3D {
       this.cheerHome.parent.add(c.llama);
       c.llama.position.copy(this.cheerHome.position);
       c.llama.rotation.copy(this.cheerHome.rotation);
-      c.llama.scale.setScalar(c.scale);          // undo the squash
-    }
-    if (this.armUniforms) {
-      this.armUniforms.uArm.value = 0;
-      this.armUniforms.uArmSplit.value = 0;
-      this.armUniforms.uReach.value = 1;
+      c.llama.scale.setScalar(c.scale);
+      const u = c.llama.userData;
+      if (u && u.mixer) {
+        u.dance.fadeOut(CREW.blend);
+        u.paddle.reset().setEffectiveWeight(1).fadeIn(CREW.blend).play();
+        c.llama.position.y = CREW.seatY - (u.lift ? u.lift.paddle : 0) * c.llama.scale.x;
+      }
     }
     this.cheer = null;
     this.cheerHome = null;
@@ -1134,9 +1203,12 @@ export class Renderer3D {
     if (this.cheer) {
       // Oars held where the stroke left them, crew seat empty.
       this.boat.userData.rig(this.cheer.t0, false, 0, true);
-      this.updateCheer(session, t);
+      this.updateCheer(session, t, dt);
     } else {
       this.boat.userData.rig(t, false, b.lean);
+      // While it is rowing the crew mixer is ticked here; during the arrival
+      // updateCheer ticks the same mixer, so only one of the two ever runs.
+      if (this.crewMixer) this.crewMixer.update(dt);
     }
 
     for (const { o, mesh, baseY } of this.whaleMeshes) {

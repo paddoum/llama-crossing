@@ -370,6 +370,48 @@ Verified by tapping `sfx.master` with an `AnalyserNode` and peak-picking the
 RMS. Onsets came out at 0.24 / 0.47 / 0.24 / 0.24 s — the eighth-and-quarter
 grid of 126 BPM — peaking at 0.28 with no clipping.
 
+## The crew llama
+
+`assets/llama-rig.glb` is one rigged llama carrying both of its Mixamo clips:
+`paddle` while it crosses and `dance` on the dock. The arrival only changes
+which clip is playing, so the llama that gets out of the boat is the same one
+that rowed it. Built from the two Mixamo FBX downloads with:
+
+```bash
+blender --background --python tools/mixamo_to_glb.py -- assets/llama-anthro.glb assets/llama-rig.glb --clip paddle=Paddling.fbx --clip dance="Brooklyn Uprock.fbx"
+```
+
+Four things that bite in that pipeline, all of them fixed in the script or at
+load and all of them found by watching the llama end up somewhere absurd:
+
+- **Do not apply Mixamo's scale.** Applying it rescales the armature's rest
+  pose but *not* the bone-location channels inside the clips, which stay in
+  centimetres. The rig then reads its own animation a hundredfold and the
+  llama is flung 1,500 units into the sky. The game scales the whole rig by
+  one number instead, which works because the mesh and its skeleton sit under
+  the same node.
+- **Do not measure a skinned model with `Box3.setFromObject`.** It derives its
+  bounds from the bones, which at load time no clip has posed. It reported
+  this model as 1.5 units tall at y 69; acting on that put the llama 2,109
+  units under the sea. `loadCrew` unions the *geometry* bounding boxes, which
+  is what the converter centred.
+- **Neither clip stands on the rig's origin.** The paddling one is a seated
+  pose whose feet hang 0.86 model-units up. `groundLift` steps each clip
+  through and records where its feet actually get to, and the llama is dropped
+  by that much when it plays. Measured on the dock: lowest hoof 16.41 against
+  a deck at 16.40.
+- **`setEffectiveWeight(0)` zeroes an action's base weight**, and `fadeIn`
+  ramps a fade factor *against* that base — so it stays at zero and the llama
+  arrives on the dock in its bind T-pose. Both actions keep a base weight of
+  1; `stop()` and `play()` choose which one runs.
+
+The oar is one of the rowboat's two (the other is hidden), taken out of its
+oarlock and laid along the line between the llama's hands every frame by
+`holdOar`. Nothing about it is hand-keyed, so it tracks whatever the clip
+does; when the llama climbs out it stops tracking and the oar stays where the
+last stroke left it. The old shader that bent the sculpted llama's forelegs
+around an oar is gone, along with the hand-made dance — the rig does both now.
+
 ## Rigging the llama elsewhere (Mixamo)
 
 `assets/llama.glb` has **no skeleton**: one mesh, one node, `skins: 0`,
