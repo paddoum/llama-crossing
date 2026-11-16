@@ -252,11 +252,12 @@ Crossing the finish line hands the frame over to `Renderer3D`'s cheer, in
 `render3d.js`. Timings live in the `CHEER` block:
 
 1. **0.45s** — the oars freeze where the stroke left them and the boat coasts.
-2. **0.45 → 1.15s** — the llama arcs out of the crew seat onto the dock
+2. **0.45 → 1.40s** — the llama arcs out of the crew seat onto the dock
    planks, unwinding the half turn that had it facing the bow, which lands it
    looking straight down the lens.
-3. **1.15s** — 170 cotillons go off, 110 more at **1.95s**, and the llama
-   bounces on the spot until the results screen arrives at **3.1s**.
+3. **1.40s** — 170 cotillons go off, the groove starts, 110 more cotillons at
+   **2.20s**, and the llama bounces on the spot until the results screen
+   arrives at **3.5s**.
 
 Two things are measured rather than assumed, because the sculpted llama and
 the code-built stand-in it falls back to are different shapes: how far the
@@ -305,6 +306,29 @@ the planks. The dance now drops the body by exactly what the legs lose
 hoof 0.7 units through the planks, so the sway is scaled by how airborne it
 is. Measured over a full loop: hooves travel 16.19..24.13 against a deck at
 16.40 — they plant within 0.2 and clear it by 7.7.
+
+### Berthing the boat
+
+The pier used to be laid 2 units past the finish line, and the boat moored
+*inside* it: the line is crossed by the hull's **middle**, so by the time the
+boat stops its bow is 30 units further on — measured 27.8 units deep into the
+deck box, with a mooring post through the hull for good measure.
+
+So the pier is now positioned off the bow rather than off the line.
+`BOW_REACH` (30) is how far the bow reaches past the boat's origin and
+`DOCK_BERTH` (8) is the open water left in front of it, which puts the deck's
+near face 38 units past the line. Everything else hangs off that face, so none
+of it can drift back into the hull: the posts stand 1 unit inside it, the deck
+runs 34 deep from it, the flagpole stands 6 short of the deck's back edge, and
+the harbour apron starts exactly where the deck ends. Measured after the move:
+8.4 units of water between bow and deck, 5.4 between bow and the nearest post.
+
+Pushing the pier back lengthened the leap from 34 units to 60, so `CHEER.hop`
+went 0.70 → 0.95s and the arc 30 → 34 — a flatter, longer jump at roughly the
+same speed rather than a floatier one. The llama still lands where it should:
+over three seconds of dancing its hooves stay between 40.4 and 54.5 units past
+the line, inside planks that run 39 to 71, and plant to within 0.14 of the
+deck.
 
 ### Cotillons
 

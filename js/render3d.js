@@ -346,7 +346,7 @@ const ANIMATE_WITHIN = 900;   // only pose creatures this close to the boat
 // moment the bow crosses the line.
 const CHEER = {
   settle: 0.45,   // oars stowed, the boat coasts the last of it
-  hop: 0.70,      // the arc out of the boat and onto the planks
+  hop: 0.95,      // the arc out of the boat and onto the planks
   second: 0.80,   // a second, smaller pop after the first
   total: 3.5,     // when state.js is allowed to put the results screen up
 };
@@ -354,7 +354,17 @@ const CHEER = {
 // its own origin is measured at the time, because the sculpted model and the
 // code-built stand-in it falls back to are different shapes.
 const DECK_TOP = 16.4;
-const DOCK_Z_INSET = 19;        // buildDock lays the deck this far past the line
+
+// Where the pier sits, as distances past the finish line. The line is crossed
+// by the boat's *middle*, so when it stops its bow is already BOW_REACH past
+// it -- lay the deck any closer than that and the boat moors inside the pier,
+// which is what it used to do, 28 units deep, mooring posts through the hull.
+const BOW_REACH = 30;           // bow, measured ahead of the boat's origin
+const DOCK_BERTH = 8;           // clear water left between the bow and the deck
+const DOCK_FACE = BOW_REACH + DOCK_BERTH;      // the deck's near face
+const DOCK_DEPTH = 34;
+const DOCK_MID = DOCK_FACE + DOCK_DEPTH / 2;
+const DOCK_LAND = DOCK_FACE + 10;              // where the llama puts its hooves
 
 // The dance on the dock. The llama is one static mesh with no skeleton, so
 // there is nothing for a canned clip to drive: every move here is the whole
@@ -824,7 +834,7 @@ export class Renderer3D {
   startCheer(session, t) {
     const level = session.level;
     const b = riverBounds(level, level.length);
-    const spot = new THREE.Vector3(b.center - HALF, DECK_TOP, -level.length - DOCK_Z_INSET);
+    const spot = new THREE.Vector3(b.center - HALF, DECK_TOP, -level.length - DOCK_LAND);
     const crew = this.boat.userData.crew;
     const llama = crew.children[0] || null;
     const from = new THREE.Vector3();
@@ -871,7 +881,7 @@ export class Renderer3D {
       const hop = Math.min(1, Math.max(0, (e - CHEER.settle) / CHEER.hop));
       const k = hop * hop * (3 - 2 * hop);
       llama.position.lerpVectors(c.from, c.spot, k);
-      llama.position.y += Math.sin(Math.PI * hop) * 30;   // the arc of the jump
+      llama.position.y += Math.sin(Math.PI * hop) * 34;   // the arc of the jump
       // The model is built facing +Z and rides the boat turned a half turn to
       // face the bow, so unwinding that turn is exactly facing the camera.
       llama.rotation.set(0, c.home - Math.PI * k, 0);
@@ -1402,18 +1412,20 @@ function buildDock(level) {
   const w = b.right - b.left, cx = b.center - HALF;
   const g = new THREE.Group();
 
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(w + 44, 8, 34), M.deckPlate);
-  deck.position.set(cx, 11, z - 19);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(w + 44, 8, DOCK_DEPTH), M.deckPlate);
+  deck.position.set(cx, 11, z - DOCK_MID);
   g.add(deck);
 
   const planks = Welder();
-  const plankGeo = new THREE.BoxGeometry(11, 2, 32);
-  for (let x = -(w + 44) / 2 + 6; x < (w + 44) / 2; x += 15) planks.add(plankGeo, [cx + x, 15.4, z - 19]);
+  const plankGeo = new THREE.BoxGeometry(11, 2, DOCK_DEPTH - 2);
+  for (let x = -(w + 44) / 2 + 6; x < (w + 44) / 2; x += 15) planks.add(plankGeo, [cx + x, 15.4, z - DOCK_MID]);
   g.add(planks.mesh(M.deckEdge));
 
+  // Mooring posts stand at the deck's face, half out in front of it -- which
+  // is also what stops the bow, so they have to sit beyond the bow's reach.
   for (const px of [b.left - HALF + 6, cx, b.right - HALF - 6]) {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 22, 6), M.dark);
-    post.position.set(px, 2, z - 3);
+    post.position.set(px, 2, z - DOCK_FACE - 1);
     g.add(post);
   }
   // finish line
@@ -1425,15 +1437,16 @@ function buildDock(level) {
   if (!pale.empty()) g.add(pale.mesh(M.white));
   if (!ink.empty()) g.add(ink.mesh(M.dark));
   // finish flag
+  const poleZ = z - DOCK_FACE - DOCK_DEPTH + 6;     // standing at the back of the deck
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 54, 6), M.buoyMast);
-  pole.position.set(cx, 42, z - 30);
+  pole.position.set(cx, 42, poleZ);
   g.add(pole);
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(30, 17), mat(COL.cyan, { side: THREE.DoubleSide }));
-  flag.position.set(cx + 16, 60, z - 30);
+  flag.position.set(cx + 16, 60, poleZ);
   g.add(flag);
-  // harbour apron behind the line
+  // Harbour apron, starting exactly where the deck ends.
   const apron = new THREE.Mesh(new THREE.BoxGeometry(w + 900, 12, 420), M.landHigh);
-  apron.position.set(cx, 6, z - 246);
+  apron.position.set(cx, 6, z - DOCK_FACE - DOCK_DEPTH - 210);
   g.add(apron);
   return g;
 }
