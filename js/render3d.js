@@ -855,6 +855,7 @@ export class Renderer3D {
     if (this.armUniforms) { this.armUniforms.uArm.value = 0; this.armUniforms.uReach.value = 1; }
     this.cheer = {
       t0: t, llama, from, spot, home, height, popped: 0,
+      sfx: session.sfx,            // endCheer has no session to ask for it
       scale: llama ? llama.scale.x : 1,
       feet: spot.y - DECK_TOP,     // origin to hooves: the squash pivots here
     };
@@ -881,6 +882,8 @@ export class Renderer3D {
       this.spawnConfetti(c.spot, 170, 1);
       c.popped = 1;
       if (session.sfx && session.sfx.pop) session.sfx.pop();
+      // The first touchdown is the downbeat: start the groove on it.
+      if (session.sfx && session.sfx.startDance) session.sfx.startDance();
     } else if (c.popped < 2 && e >= landed + CHEER.second) {
       this.spawnConfetti(c.spot, 110, 0.82);
       c.popped = 2;
@@ -927,6 +930,7 @@ export class Renderer3D {
   // replay starts with a crewed boat rather than an empty one.
   endCheer() {
     const c = this.cheer;
+    if (c && c.sfx && c.sfx.stopDance) c.sfx.stopDance();
     if (c && c.llama && this.cheerHome) {
       this.cheerHome.parent.add(c.llama);
       c.llama.position.copy(this.cheerHome.position);

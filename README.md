@@ -315,6 +315,28 @@ out, so anything above about 2.5 units fills the sky with playing cards.
 Gravity is lightened to 120 and vertical speed is damped, because paper
 floats — at full gravity they are gone before the results screen.
 
+### Something to dance to
+
+`Sfx.startDance()` in `js/audio.js` plays a 126 BPM groove under the dance,
+synthesised like everything else in that file — kick, hat, clap, a triangle
+bass walking I–V–vi–IV, and a square riff on C major pentatonic (which sits
+on all four chords, so it never has to be transposed). It is the same tempo
+the llama is driven at: `up = |sin(ph)|` touches down on every eighth, so the
+kick on the beat lands on every other hop.
+
+There is no knowing in advance how long it has to play — the results screen
+goes up over a dance that keeps going — so bars are written onto the WebAudio
+clock a few at a time by a `setTimeout` pump. The lookahead is 1.5 s against a
+350 ms tick: generous on purpose, because a backgrounded tab throttles
+`setTimeout` to one second and a shorter lookahead would drop bars. All of it
+goes through its own gain node, so `stopDance()` can ramp that bus to zero and
+silence the lookahead already on the clock instead of waiting it out. Measured
+on quit: dead within 300 ms, silent after 400.
+
+Verified by tapping `sfx.master` with an `AnalyserNode` and peak-picking the
+RMS. Onsets came out at 0.24 / 0.47 / 0.24 / 0.24 s — the eighth-and-quarter
+grid of 126 BPM — peaking at 0.28 with no clipping.
+
 ## Rigging the llama elsewhere (Mixamo)
 
 `assets/llama.glb` has **no skeleton**: one mesh, one node, `skins: 0`,
