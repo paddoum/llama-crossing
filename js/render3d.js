@@ -317,11 +317,15 @@ const CREW = {
   dance: /dance/i,
   height: 46,        // scaled to this, in world units, to match the boat
   seatY: 3.0,        // where the hooves want to be, above the crew group
-  // glTF export turns Blender +Y into -Z, so the model arrives already facing
-  // the bow: no turn, unlike the sculpted llama this replaced. Unwinding half
-  // a turn at the dock then points it at the camera, which is what the arrival
-  // already does.
-  yaw: 0,
+  // glTF export turns Blender +Y into -Z, so the model arrives facing the bow
+  // at yaw 0. It sits the other way round, facing back down the river the way
+  // anyone rowing a boat does -- which is also the side the chase camera is
+  // on, so you see its face rather than its tail.
+  yaw: Math.PI,
+  // Where it ends up on the dock: the arrival camera sits on the +Z side of
+  // the llama, and the model faces -Z, so half a turn points it down the lens.
+  // Kept separate from the seat because the two are free to disagree.
+  dockYaw: Math.PI,
   blend: 0.35,       // crossfade between the two clips
 };
 // Seated: dropped so the gunwale crosses above the legs, which puts the body
@@ -520,6 +524,14 @@ export class Renderer3D {
     const [keep, ...rest] = this.oars;
     for (const { pivot } of rest) pivot.visible = false;
     const oar = keep.oar;
+    // Where it was stowed, captured before attach() rewrites the transform.
+    const stowed = {
+      parent: oar.parent,
+      position: oar.position.clone(),
+      quaternion: oar.quaternion.clone(),
+      scale: oar.scale.clone(),
+      pivot: keep.pivot,
+    };
     this.boatModel.attach(oar);                 // out of the oarlock pivot
     keep.pivot.visible = false;
 
@@ -533,11 +545,32 @@ export class Renderer3D {
     const centre = box.getCenter(new THREE.Vector3());
     oar.updateWorldMatrix(true, false);
     this.crewHands = {
-      oar, left, right, axis,
+      oar, left, right, axis, stowed,
       centre: oar.worldToLocal(centre.clone()),
       length: Math.max(size.x, size.y, size.z),
     };
     this.holdOar();
+  }
+
+  // Puts the oar back in its oarlock. Without this it keeps whatever transform
+  // the last stroke gave it and hangs in the air over the empty boat while the
+  // llama dances on the dock.
+  stowOar(back) {
+    const h = this.crewHands;
+    if (!h || h.isStowed === back) return;
+    h.isStowed = back;
+    const w = h.stowed;
+    if (back) {
+      w.parent.add(h.oar);
+      h.oar.position.copy(w.position);
+      h.oar.quaternion.copy(w.quaternion);
+      h.oar.scale.copy(w.scale);
+      w.pivot.visible = true;
+    } else {
+      this.boatModel.attach(h.oar);
+      w.pivot.visible = false;
+      this.holdOar();
+    }
   }
 
   // Lays the oar along the line between the llama's hands, every frame, so it
@@ -759,11 +792,13 @@ export class Renderer3D {
             pivot.rotation.y = sweep * 0.52 * side;
             pivot.rotation.x = dip * 0.30;        // blades lift on the recovery
           }
-        } else if (!crewFree) {
+        } else if (crewFree) {
+          // The llama has climbed out, so the oar goes back in its oarlock.
+          this.stowOar(true);
+        } else {
+          this.stowOar(false);
           this.holdOar();
         }
-        // crewFree means the llama has climbed out: the oar stops tracking its
-        // hands and stays where the last stroke left it, lying in the boat.
         model.rotation.z = -lean * 0.12;
         if (crewFree) return;
         boat.userData.crew.position.y = celebrating ? Math.abs(Math.sin(t * 10)) * 4 : 0;
@@ -986,7 +1021,13 @@ export class Renderer3D {
       llama.position.y += Math.sin(Math.PI * hop) * 34;   // the arc of the jump
       // The model is built facing +Z and rides the boat turned a half turn to
       // face the bow, so unwinding that turn is exactly facing the camera.
-      llama.rotation.set(0, c.home - Math.PI * k, 0);
+      // Turn from however it was sitting to facing the camera, the short way
+      // round. Not a fixed half turn: the seat and the dock are set
+      // independently, and when they agree this leaves the rotation alone.
+      let turn = (CREW.dockYaw - c.home) % (Math.PI * 2);
+      if (turn > Math.PI) turn -= Math.PI * 2;
+      if (turn < -Math.PI) turn += Math.PI * 2;
+      llama.rotation.set(0, c.home + turn * k, 0);
       // Landed: pin it to the spot and let the clip do the rest.
       if (hop >= 1) llama.position.copy(c.spot);
     }

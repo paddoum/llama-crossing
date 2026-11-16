@@ -414,11 +414,18 @@ load and all of them found by watching the llama end up somewhere absurd:
   arrives on the dock in its bind T-pose. Both actions keep a base weight of
   1; `stop()` and `play()` choose which one runs.
 
+The llama sits facing **back down the river**, the way anyone rowing a boat
+does, which is also the side the chase camera is on -- so you watch its face
+rather than its tail. `CREW.yaw` is the seat and `CREW.dockYaw` is where the
+arrival turns it to; they are separate on purpose, and the hop takes the short
+way round between them rather than a fixed half turn.
+
 The oar is one of the rowboat's two (the other is hidden), taken out of its
 oarlock and laid along the line between the llama's hands every frame by
 `holdOar`. Nothing about it is hand-keyed, so it tracks whatever the clip
-does; when the llama climbs out it stops tracking and the oar stays where the
-last stroke left it. The old shader that bent the sculpted llama's forelegs
+does. When the llama climbs out, `stowOar` puts it back in its oarlock --
+left to its own devices it keeps the last stroke's transform and hangs in the
+air over an empty boat. The old shader that bent the sculpted llama's forelegs
 around an oar is gone, along with the hand-made dance — the rig does both now.
 
 ## Rigging the llama elsewhere (Mixamo)
