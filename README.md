@@ -381,14 +381,20 @@ grid of 126 BPM — peaking at 0.28 with no clipping.
 
 ## The crew llama
 
-`assets/llama-rig.glb` is one rigged llama carrying both of its Mixamo clips:
-`paddle` while it crosses and `dance` on the dock. The arrival only changes
-which clip is playing, so the llama that gets out of the boat is the same one
-that rowed it. Built from the two Mixamo FBX downloads with:
+`assets/llama-rig.glb` is one rigged llama carrying four Mixamo clips:
+`paddle` while it crosses, and three dances, one picked at random each time it
+lands. The arrival only changes which clip is playing, so the llama that gets
+out of the boat is the same one that rowed it. Any clip whose name starts with
+`dance` joins the pool, so adding a fourth is a re-export and nothing else:
 
 ```bash
-blender --background --python tools/mixamo_to_glb.py -- assets/llama-anthro.glb assets/llama-rig.glb --clip paddle=Paddling.fbx --clip dance="Brooklyn Uprock.fbx"
+blender --background --python tools/mixamo_to_glb.py -- assets/llama-anthro.glb assets/llama-rig.glb --clip paddle=Paddling.fbx --clip dance-uprock="Brooklyn Uprock.fbx" --clip dance-freeze="Breakdance Freeze Var 2.fbx" --clip dance-hiphop="Hip Hop Dancing.fbx" --texture 1024 --jpeg
 ```
+
+Every clip is asked where its own floor and its own heading are, because three
+dances off the same rig agree about neither: their headings came out 34, -1
+and -165 degrees apart. `groundLift` and `clipHeading` measure each one at
+load, so a new dance needs no hand-tuning.
 
 Four things that bite in that pipeline, all of them fixed in the script or at
 load and all of them found by watching the llama end up somewhere absurd:
@@ -420,12 +426,35 @@ rather than its tail. `CREW.yaw` is the seat and `CREW.dockYaw` is where the
 arrival turns it to; they are separate on purpose, and the hop takes the short
 way round between them rather than a fixed half turn.
 
-The oar is one of the rowboat's two (the other is hidden), taken out of its
-oarlock and laid along the line between the llama's hands every frame by
-`holdOar`. Nothing about it is hand-keyed, so it tracks whatever the clip
-does. When the llama climbs out, `stowOar` puts it back in its oarlock --
-left to its own devices it keeps the last stroke's transform and hangs in the
-air over an empty boat. The old shader that bent the sculpted llama's forelegs
+### Looking at you
+
+A dance choreographed for a stage spends a lot of it with its back to the
+camera. On top of whatever the clip is doing, `lookAtCamera` turns the llama
+towards the lens through three bones -- upper spine, neck, head -- each taking
+a share of the correction up to its own ceiling, so the turn is spread instead
+of the head swivelling like an owl's. Which way a bone "faces" is read off the
+bind pose, where the whole model faces -Z; a Mixamo bone's own axes run along
+the bone and say nothing about facing.
+
+Measured as degrees the snout is off the camera, averaged over 2.5s of each
+dance: the breakdance freeze 2, the hip hop 24, the uprock 48 -- that last one
+turns its back by design and the clamps stop short of wringing its neck.
+
+### The oar
+
+One of the rowboat's two (the other is hidden), taken out of its oarlock and
+**parented to the left hand** so it cannot come loose. It is placed once, at a
+quarter of the way through the paddle stroke: shaft down the line between the
+hands, slid along so they grip near the handle, and turned so the blade goes
+down -- the blade end being found by comparing how far each half of the mesh
+spreads off the shaft. Over a stroke it sweeps from the waterline to 50 units
+up, which is the arc you want.
+
+An earlier version fitted it between both hands every frame, which made it
+slide and stretch as their separation changed and read as an oar floating near
+the llama rather than one held by it. When the llama climbs out, `stowOar`
+puts it back in its oarlock -- left alone it keeps the last stroke's transform
+and hangs in the air over an empty boat. The old shader that bent the sculpted llama's forelegs
 around an oar is gone, along with the hand-made dance — the rig does both now.
 
 ## Rigging the llama elsewhere (Mixamo)
