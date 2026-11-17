@@ -381,20 +381,20 @@ grid of 126 BPM — peaking at 0.28 with no clipping.
 
 ## The crew llama
 
-`assets/llama-rig.glb` is one rigged llama carrying four Mixamo clips:
-`paddle` while it crosses, and three dances, one picked at random each time it
+`assets/llama-rig.glb` is one rigged llama carrying three Mixamo clips:
+`paddle` while it crosses, and two dances, one picked at random each time it
 lands. The arrival only changes which clip is playing, so the llama that gets
 out of the boat is the same one that rowed it. Any clip whose name starts with
-`dance` joins the pool, so adding a fourth is a re-export and nothing else:
+`dance` joins the pool, so adding a third is a re-export and nothing else:
 
 ```bash
-blender --background --python tools/mixamo_to_glb.py -- assets/llama-anthro.glb assets/llama-rig.glb --clip paddle=Paddling.fbx --clip dance-uprock="Brooklyn Uprock.fbx" --clip dance-freeze="Breakdance Freeze Var 2.fbx" --clip dance-hiphop="Hip Hop Dancing.fbx" --texture 1024 --jpeg
+blender --background --python tools/mixamo_to_glb.py -- assets/llama-anthro.glb assets/llama-rig.glb --clip paddle=Paddling.fbx --clip dance-freeze="Breakdance Freeze Var 2.fbx" --clip dance-hiphop="Hip Hop Dancing.fbx" --texture 1024 --jpeg
 ```
 
-Every clip is asked where its own floor and its own heading are, because three
-dances off the same rig agree about neither: their headings came out 34, -1
-and -165 degrees apart. `groundLift` and `clipHeading` measure each one at
-load, so a new dance needs no hand-tuning.
+Every clip is asked where its own floor and its own heading are, because two
+dances off the same rig agree about neither: their headings came out -166
+and -1 degrees. `groundLift` and `clipHeading` measure each one at load, so
+a new dance needs no hand-tuning.
 
 Four things that bite in that pipeline, all of them fixed in the script or at
 load and all of them found by watching the llama end up somewhere absurd:
@@ -437,8 +437,10 @@ bind pose, where the whole model faces -Z; a Mixamo bone's own axes run along
 the bone and say nothing about facing.
 
 Measured as degrees the snout is off the camera, averaged over 2.5s of each
-dance: the breakdance freeze 2, the hip hop 24, the uprock 48 -- that last one
-turns its back by design and the clamps stop short of wringing its neck.
+dance: the breakdance freeze 3, the hip hop 34. A third clip, a Brooklyn
+uprock, was dropped from the pool rather than bent further: it turns its back
+by design and sat near 50 degrees, and the clamps stop short of wringing a
+neck.
 
 ### The oar
 

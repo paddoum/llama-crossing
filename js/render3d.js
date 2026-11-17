@@ -331,7 +331,7 @@ const CREW = {
   dockYaw: Math.PI,
   blend: 0.35,       // crossfade between the two clips
   // While it dances it also turns its head to the camera, on top of whatever
-  // the clip is doing with it. Clamped, or a 4/4 uprock wrings its neck.
+  // the clip is doing with it. Clamped, or a busy clip wrings its neck.
   // Shared between the neck and the head so it does not read as an owl: the
   // neck takes a little, the head the rest, each with its own ceiling.
   look: [
