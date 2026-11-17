@@ -381,14 +381,14 @@ grid of 126 BPM — peaking at 0.28 with no clipping.
 
 ## The crew llama
 
-`assets/llama-rig.glb` is one rigged llama carrying three Mixamo clips:
+`assets/llama-rig.glb` is one rigged llama carrying three body clips --
 `paddle` while it crosses, and two dances, one picked at random each time it
-lands. The arrival only changes which clip is playing, so the llama that gets
+lands -- plus `prop`, which moves the paddle the paddling clip came with. The arrival only changes which clip is playing, so the llama that gets
 out of the boat is the same one that rowed it. Any clip whose name starts with
 `dance` joins the pool, so adding a third is a re-export and nothing else:
 
 ```bash
-blender --background --python tools/mixamo_to_glb.py -- assets/llama-anthro.glb assets/llama-rig.glb --clip paddle=Paddling.fbx --clip dance-freeze="Breakdance Freeze Var 2.fbx" --clip dance-hiphop="Hip Hop Dancing.fbx" --texture 1024 --jpeg
+blender --background --python tools/mixamo_to_glb.py -- assets/llama-anthro.glb assets/llama-rig.glb --clip paddle="Paddling (4).fbx" --clip dance-freeze="Breakdance Freeze Var 2.fbx" --clip dance-hiphop="Hip Hop Dancing.fbx" --texture 1024 --jpeg
 ```
 
 Every clip is asked where its own floor and its own heading are, because two
@@ -442,54 +442,65 @@ uprock, was dropped from the pool rather than bent further: it turns its back
 by design and sat near 50 degrees, and the clamps stop short of wringing a
 neck.
 
-### The oar
+### The paddle
 
-One of the rowboat's two (the other is hidden), taken out of its oarlock and
-**threaded through both hands** every frame by `fitOar`: the butt end in the
-upper hand, the shaft running down through the lower one, the blade reaching
-past it towards the water. The blade end is found by comparing how far each
-half of the mesh spreads off the shaft -- the bulky half is the blade.
+The paddling animation **brings its own paddle**. It arrives in the FBX as a
+plain mesh with a clip of its own -- not skinned, not parented to a hand --
+keyed in the same space as the body, blade dipping below the character's floor
+plane where water would be. Nothing in the game has to place it: `prop` plays
+on the same `AnimationMixer` as `paddle`, so one clock drives both and they
+cannot drift apart. The boat's own two oars stay shipped and out of sight.
 
-Which hand is on the grip is read from the clip rather than fixed, because
-`paddle` is a canoe stroke that **changes sides**: the hands sweep from one
-side of the body to the other and the lower one alternates, left through one
-stroke and right through the next. Taking the shaft from the line between the
-hands means the paddle crosses over with them, twice per cycle, on its own.
+The converter carries any such prop through, and a few things about that are
+worth knowing:
 
-Three things that are less obvious than they look:
+- **It arrives as a node with one mesh per material** -- ash, grip and blade
+  here -- so it is the node that is matched and the whole subtree that moves.
+- **It is left out of the body measurement.** A paddle carried overhead
+  reaches higher than the llama does, and measuring the two together scales
+  the model down to fit the paddle into the boat: counted in, this body came
+  out 1.87 tall against its true 1.70.
+- **Its keys are not moved when the rig is stood on the origin.** That
+  centring only ever applies to the rest pose, because a clip keys the
+  armature object's own location and overwrites it the moment it plays. Shift
+  the prop to match and you pull the two apart -- which put this paddle 0.85
+  up, a good arm's length above the hands holding it.
+- **Materials keep their colour.** A prop can be plain painted material with
+  no texture at all, and a loader that keeps only the map leaves a white
+  paddle.
+- **It is hidden, not stowed, when the llama climbs out.** Only the rowing
+  clip animates it, so left visible it hangs in the air over an empty boat
+  through the whole dance. The reference to it is held directly rather than
+  looked up through the crew group, because the arrival lifts the llama out of
+  that group at exactly the moment the paddle most needs hiding.
 
-- **Which hand is on top is only decided while one is clearly above the
-  other.** Through the catch and the recovery they sit level to within a unit,
-  and reading the answer off that noise flips the paddle end over end several
-  times a second. Past three units the answer is taken and then held.
-- **Changing sides is cross-faded, not eased.** The two ends share a line, so
-  the new shaft direction is the exact opposite of the old one; easing one
-  vector towards its own opposite shrinks it to nothing and then snaps. The
-  whole placement -- rotation and position together -- is blended instead,
-  which swings the blade over on a definite arc. Only the swap is blended;
-  every other frame tracks the hands exactly, where an ease would just lag.
-- **The oar node carries a lopsided scale of its own** from the boat model,
-  about 0.27 across the blade against 2.13 along it. A length measured off the
-  world bounding box is in different units from an offset applied inside the
-  oar, and mixing the two sent the blade swinging several body-lengths wide.
-  Everything is measured in the oar's own frame and converted once.
+Measured in the game: the paddle holds 45.5 units against a 46-unit llama, the
+hands stay within 1.3 of the shaft on average (the clip has them slide and
+briefly release through the side changes, by design), the blade crosses from
+29 units one side of the boat to 31 the other, and at the catch it comes down
+to 0.2 above the water -- which sits at y 0.
 
-Parenting the oar rigidly to one hand, which an earlier version did, cannot
-follow a change of sides at all: the offset is frozen at whatever the pose was
-when it was handed over, so the blade keeps pointing where it pointed on the
-first stroke and waves in the air through the one on the other side. The
-version before that fitted it between both hands every frame but anchored its
-centre, so it slid along the shaft as the hands opened and closed.
+#### Fitting an oar to a rig that has none
 
-Measured over two cycles: the shaft holds 26.7 units, both hands sit exactly
-on it for 98% of the time, the blade crosses from 25 units one side of the
-boat to 19 the other, and there are exactly two side changes per cycle. The
-blade bottoms out 8 units above the water, so the llama is paddling just shy
-of the surface -- the clip's hands never come low enough for a paddle this
-length to reach it.
+Mixamo gives you a body and nothing to hold, so `fitOar` stays as the fallback
+for a clip that brings no prop. It threads one of the boat's oars through both
+hands each frame: butt end in the upper hand, shaft down through the lower one,
+blade reaching past it. Which hand is on the grip is read from the clip and
+only decided while one is clearly above the other -- through the catch and the
+recovery they sit level to within a unit, and reading the answer off that noise
+flips the paddle end over end several times a second.
 
-When the llama climbs out, `stowOar` puts it back in its oarlock -- left alone
-it keeps the last stroke's transform and hangs in the air over an empty boat.
+Changing sides is cross-faded rather than eased: the two ends share a line, so
+the new shaft direction is the exact opposite of the old one, and easing one
+vector towards its own opposite shrinks it to nothing and then snaps. Only the
+swap is blended; every other frame tracks the hands exactly.
+
+That path also has to watch its units. The boat's oar node carries a lopsided
+scale of its own, about 0.27 across the blade against 2.13 along it, so a
+length measured off the world bounding box is in different units from an offset
+applied inside the oar -- mixing the two sent the blade swinging several
+body-lengths wide. It is measured in the oar's own frame and converted once.
+
 The old shader that bent the sculpted llama's forelegs around an oar is gone,
 along with the hand-made dance — the rig does both now.
 

@@ -313,8 +313,16 @@ const MENU_BOAT_H = 74, MENU_BOAT_MID = 29;
 // hooves and it stands 1.7 units tall, both guaranteed by the converter.
 const CREW = {
   url: 'assets/llama-rig.glb',
-  paddle: /paddle/i,
+  paddle: /^paddle$/i,
   dance: /^dance/i,       // every clip whose name starts with "dance"
+  // An animation may bring its own prop: a mesh that is not skinned, moved by
+  // a clip of its own. The paddling performance supplies the paddle the llama
+  // is holding, which beats anything that can be fitted to the hands after.
+  prop: /^prop$/i,
+  // The prop arrives as a node with a mesh under it per material -- three of
+  // them for this paddle, ash, grip and blade -- so it is the node that is
+  // matched, and the whole subtree goes with it.
+  propNode: /^(paddle|oar)/i,
 
   height: 46,        // scaled to this, in world units, to match the boat
   seatY: 3.0,        // where the hooves want to be, above the crew group
@@ -368,6 +376,19 @@ const SEA_LIFE = {
 };
 
 const ANIMATE_WITHIN = 900;
+
+// The prop node in a crew model, and whether something hangs off it. Bones are
+// skipped: a rig can carry a bone whose name reads like a prop.
+const findProp = (root) => {
+  let found = null;
+  root.traverse((o) => { if (!found && !o.isBone && CREW.propNode.test(o.name)) found = o; });
+  return found;
+};
+const under = (o, root) => {
+  if (!root) return false;
+  for (let p = o; p; p = p.parent) if (p === root) return true;
+  return false;
+};
 
 // How the llama holds the paddle. The clip is a canoe stroke that changes
 // sides: the hands sweep across the body and the lower one alternates, left
@@ -511,12 +532,18 @@ export class Renderer3D {
     new GLTFLoader().load(CREW.url, (gltf) => {
       gltf.scene.traverse((o) => {
         if (!o.isMesh) return;
-        // Lambert to sit in the same light as everything else, keeping the map.
-        o.material = new THREE.MeshLambertMaterial({ map: o.material.map });
+        // Lambert to sit in the same light as everything else. The colour
+        // matters as much as the map: a prop can be plain painted material
+        // with no texture at all, and dropping it leaves a white paddle.
+        o.material = new THREE.MeshLambertMaterial({
+          map: o.material.map || null,
+          color: o.material.color ? o.material.color.clone() : 0xffffff,
+        });
         o.frustumCulled = false;      // skinned bounds go stale as it moves
       });
       const paddle = gltf.animations.find((a) => CREW.paddle.test(a.name));
       const dances = gltf.animations.filter((a) => CREW.dance.test(a.name));
+      const prop = gltf.animations.find((a) => CREW.prop.test(a.name));
       if (!paddle || !dances.length) {
         console.warn('crew model is missing a clip; keeping the built-in llama.',
           gltf.animations.map((a) => a.name));
@@ -527,19 +554,40 @@ export class Renderer3D {
       // been posed by any clip: it reported this model as 1.5 units tall at
       // y 69, and acting on that put the llama 2109 units under the sea.
       // The bind-pose geometry is what the converter centred, so trust that.
+      // The prop is left out of it. A paddle carried over the llama's head
+      // reaches a good deal higher than the llama does, and measuring the two
+      // together scales the model down to fit the paddle into the boat: with
+      // it counted this body came out 1.87 tall against its true 1.70.
+      const propRoot = findProp(gltf.scene);
       const box = new THREE.Box3();
       gltf.scene.traverse((o) => {
-        if (!o.isMesh) return;
+        if (!o.isMesh || under(o, propRoot)) return;
         o.geometry.computeBoundingBox();
         box.union(o.geometry.boundingBox);
       });
       this.crewModel = {
-        gltf, paddle, dances,
+        gltf, paddle, dances, prop,
         height: box.max.y - box.min.y,
         offset: new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2),
       };
       this.seatCrew();
     }, undefined, (err) => console.warn('crew model failed to load; keeping the built-in llama.', err));
+  }
+
+  // The llama's own paddle, when its animation brought one. Held directly
+  // rather than looked up through the crew group: the arrival lifts the llama
+  // out of that group onto the dock, and a lookup through it comes back empty
+  // at exactly the moment the paddle most needs hiding.
+  crewProp() {
+    return this.crewPropRef || null;
+  }
+
+  // Both oars stay out of sight when the llama has a paddle of its own: a
+  // rowboat with its oars shipped and a canoeist aboard reads better than one
+  // with three blades in the water.
+  shipOars() {
+    if (!this.oars) return;
+    for (const { pivot } of this.oars) pivot.visible = false;
   }
 
   // Takes one of the boat's two oars out of its oarlock and gives it to the
@@ -549,6 +597,7 @@ export class Renderer3D {
     if (!this.oars || !this.crewModel || this.crewHands) return;
     const crew = this.boat.userData.crew.children[0];
     if (!crew) return;
+    if (crew.userData.prop) { this.shipOars(); return; }   // it has its own
     let mesh = null;
     crew.traverse((o) => { if (o.isSkinnedMesh && !mesh) mesh = o; });
     if (!mesh) return;
@@ -871,11 +920,27 @@ export class Renderer3D {
     // pick which one runs and let the crossfade do the rest.
     for (const x of dances) x.action.setEffectiveWeight(1).stop();
     paddle.reset().setEffectiveWeight(1).play();
+
+    // The prop rides the same mixer as the body, so the two cannot drift: one
+    // clock drives both. It is started after the measurements above, which
+    // stop every other action to isolate the one they are sampling.
+    const propMesh = findProp(model);
+    this.crewPropRef = null;
+    if (d.prop && propMesh) {
+      const prop = mixer.clipAction(d.prop);
+      prop.reset().setEffectiveWeight(1).play();
+      model.userData.prop = { action: prop, mesh: propMesh };
+      this.crewPropRef = model.userData.prop;
+    }
+
     mixer.setTime(0);
     model.position.y = CREW.seatY - model.userData.lift.paddle * model.scale.x;
     this.crewMixer = mixer;
     this.crewHands = null;
-    this.giveOar();
+    // The llama brought its own paddle, so the boat keeps both of its oars
+    // shipped and none of the fitting below has to run.
+    if (model.userData.prop) this.shipOars();
+    else this.giveOar();
     // It is rigged now, so the swell only has to rock the whole body.
     // (position.y is owned by the clip offset above, so liven leaves it alone.)
     this.boat.userData.liven = (t, celebrating) => {
@@ -1002,17 +1067,24 @@ export class Renderer3D {
         // Once the rigged llama is aboard it holds the oar itself and the
         // oarlock sweep is off: a hand-animated oar next to an animated
         // paddler just reads as two things rowing out of time.
-        if (!this.crewHands) {
+        const prop = this.crewProp();
+        if (prop) {
+          // The llama brought its own paddle and its clip moves it, so there
+          // is nothing to drive here. It only has to go away when the llama
+          // does: only the rowing clip animates it, so left visible it would
+          // hang in the air over an empty boat through the whole dance.
+          prop.mesh.visible = !crewFree;
+        } else if (this.crewHands) {
+          // A paddle fitted to the hands instead; back in its oarlock it goes.
+          this.stowOar(crewFree);
+        } else {
+          // No rigged llama at all: the stand-in works the oarlocks.
           for (const { pivot, side } of oars) {
             // The oarlocks are on opposite sides, so the yaw has to mirror for
             // the blades to sweep together instead of scissoring.
             pivot.rotation.y = sweep * 0.52 * side;
             pivot.rotation.x = dip * 0.30;        // blades lift on the recovery
           }
-        } else {
-          // The oar is parented to the hand, so it needs nothing per frame --
-          // only putting back in its oarlock when the llama climbs out.
-          this.stowOar(crewFree);
         }
         model.rotation.z = -lean * 0.12;
         if (crewFree) return;
@@ -1473,7 +1545,8 @@ export class Renderer3D {
       // While it is rowing the crew mixer is ticked here; during the arrival
       // updateCheer ticks the same mixer, so only one of the two ever runs.
       if (this.crewMixer) this.crewMixer.update(dt);
-      // After the clip has posed the hands, never before.
+      // After the clip has posed the hands, never before. Does nothing when
+      // the llama's own animation supplies the paddle.
       this.fitOar(dt);
     }
 

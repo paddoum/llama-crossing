@@ -8,6 +8,11 @@
 # its action, stashed onto that rig as an NLA strip (which is what the glTF
 # exporter walks to decide what to write out).
 #
+# An animation may also bring a prop with it -- a paddle, say -- as a plain
+# mesh with its own object animation rather than anything skinned. Those are
+# carried through and stashed under their own clip, which the game plays on the
+# same mixer alongside the body clip, so the two stay in step.
+#
 # Two things Mixamo's round trip gets wrong for us:
 #   - the material points at a texture inside Mixamo's own upload folder, a
 #     path that does not exist here, so the skin is re-linked from the GLB that
@@ -69,29 +74,52 @@ if arm.animation_data is None:
     arm.animation_data_create()
 
 
-def stash(action, name):
+def stash(obj, action, name):
     action.name = name
     action.use_fake_user = True
-    track = arm.animation_data.nla_tracks.new()
+    if obj.animation_data is None:
+        obj.animation_data_create()
+    track = obj.animation_data.nla_tracks.new()
     track.name = name
     track.strips.new(name, int(action.frame_range[0]), action)
     span = (action.frame_range[1] - action.frame_range[0]) / fps
-    print(f'CLIP    {name!r} frames {action.frame_range[0]:.0f}..{action.frame_range[1]:.0f} '
-          f'@ {fps}fps = {span:.2f}s')
+    print(f'CLIP    {name!r} on {obj.name!r} frames {action.frame_range[0]:.0f}..'
+          f'{action.frame_range[1]:.0f} @ {fps}fps = {span:.2f}s')
 
 
-stash(act, clips[0][0])
+stash(arm, act, clips[0][0])
+
+# Props: anything in the first file that is a mesh but not skinned. They are
+# animated as objects, so each keeps its own clip rather than being merged into
+# the body's -- one mixer drives both and they cannot drift apart.
+props = []
+for o in objs:
+    if o.type != 'MESH' or o is mesh:
+        continue
+    if o.animation_data is None or o.animation_data.action is None:
+        print(f'PROP    {o.name!r} has no animation, dropped')
+        bpy.data.objects.remove(o, do_unlink=True)
+        continue
+    pact = o.animation_data.action
+    o.animation_data.action = None
+    name = 'prop' if not props else f'prop-{o.name.lower()}'
+    stash(o, pact, name)
+    props.append(o)
+    mats = [m.name for m in o.data.materials]
+    print(f'PROP    {o.name!r} {len(o.data.vertices)} verts, materials {mats}')
 
 # 3. Every other FBX: keep its action, throw the duplicate rig and mesh away.
 for name, path in clips[1:]:
     objs2, act2 = import_fbx(path)
     if act2 is None:
         raise SystemExit('no action in ' + path)
-    stash(act2, name)
+    stash(arm, act2, name)
     for o in objs2:
         bpy.data.objects.remove(o, do_unlink=True)
 
 arm.animation_data.action = None      # otherwise the active action exports twice
+for o in props:
+    o.animation_data.action = None
 
 # 4. Re-link the skin onto whatever material came in with the FBX.
 for mat in mesh.data.materials:
@@ -138,9 +166,20 @@ def rest_box():
 lo, hi = rest_box()
 print(f'SIZE    {hi[0]-lo[0]:.3f} x {hi[1]-lo[1]:.3f} x {hi[2]-lo[2]:.3f}')
 print(f'BEFORE  x {lo[0]:+.3f}..{hi[0]:+.3f}  y {lo[1]:+.3f}..{hi[1]:+.3f}  z {lo[2]:+.3f}..{hi[2]:+.3f}')
-arm.location.x -= (lo[0] + hi[0]) / 2
-arm.location.y -= (lo[1] + hi[1]) / 2
-arm.location.z -= lo[2]                      # hooves on the floor, Blender is Z-up
+delta = (-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2])   # Blender is Z-up
+arm.location.x += delta[0]
+arm.location.y += delta[1]
+arm.location.z += delta[2]                   # hooves on the floor
+# Props are deliberately left where they are. The centring above only moves
+# the rest pose: a Mixamo clip keys the armature object's own location, so the
+# moment one plays it writes over arm.location and the rig goes back to where
+# the performance put it. A prop keyed in the same space as the body stays with
+# the body, and shifting it would be the one thing that pulled the two apart --
+# it put this paddle 0.85 up, a good arm's length above the hands holding it.
+# What actually stands each clip on the deck is groundLift, in the game, which
+# measures the feet per clip and drops the whole model to suit.
+if props:
+    print(f'PROP    left in the performance\'s own space, as the body is')
 arm.scale = (1, 1, 1) if arm.scale.x == 0 else arm.scale
 lo, hi = rest_box()
 print(f'CENTRED x {lo[0]:+.3f}..{hi[0]:+.3f}  y {lo[1]:+.3f}..{hi[1]:+.3f}  z {lo[2]:+.3f}..{hi[2]:+.3f}')
