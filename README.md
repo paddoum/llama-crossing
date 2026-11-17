@@ -445,19 +445,53 @@ neck.
 ### The oar
 
 One of the rowboat's two (the other is hidden), taken out of its oarlock and
-**parented to the left hand** so it cannot come loose. It is placed once, at a
-quarter of the way through the paddle stroke: shaft down the line between the
-hands, slid along so they grip near the handle, and turned so the blade goes
-down -- the blade end being found by comparing how far each half of the mesh
-spreads off the shaft. Over a stroke it sweeps from the waterline to 50 units
-up, which is the arc you want.
+**threaded through both hands** every frame by `fitOar`: the butt end in the
+upper hand, the shaft running down through the lower one, the blade reaching
+past it towards the water. The blade end is found by comparing how far each
+half of the mesh spreads off the shaft -- the bulky half is the blade.
 
-An earlier version fitted it between both hands every frame, which made it
-slide and stretch as their separation changed and read as an oar floating near
-the llama rather than one held by it. When the llama climbs out, `stowOar`
-puts it back in its oarlock -- left alone it keeps the last stroke's transform
-and hangs in the air over an empty boat. The old shader that bent the sculpted llama's forelegs
-around an oar is gone, along with the hand-made dance — the rig does both now.
+Which hand is on the grip is read from the clip rather than fixed, because
+`paddle` is a canoe stroke that **changes sides**: the hands sweep from one
+side of the body to the other and the lower one alternates, left through one
+stroke and right through the next. Taking the shaft from the line between the
+hands means the paddle crosses over with them, twice per cycle, on its own.
+
+Three things that are less obvious than they look:
+
+- **Which hand is on top is only decided while one is clearly above the
+  other.** Through the catch and the recovery they sit level to within a unit,
+  and reading the answer off that noise flips the paddle end over end several
+  times a second. Past three units the answer is taken and then held.
+- **Changing sides is cross-faded, not eased.** The two ends share a line, so
+  the new shaft direction is the exact opposite of the old one; easing one
+  vector towards its own opposite shrinks it to nothing and then snaps. The
+  whole placement -- rotation and position together -- is blended instead,
+  which swings the blade over on a definite arc. Only the swap is blended;
+  every other frame tracks the hands exactly, where an ease would just lag.
+- **The oar node carries a lopsided scale of its own** from the boat model,
+  about 0.27 across the blade against 2.13 along it. A length measured off the
+  world bounding box is in different units from an offset applied inside the
+  oar, and mixing the two sent the blade swinging several body-lengths wide.
+  Everything is measured in the oar's own frame and converted once.
+
+Parenting the oar rigidly to one hand, which an earlier version did, cannot
+follow a change of sides at all: the offset is frozen at whatever the pose was
+when it was handed over, so the blade keeps pointing where it pointed on the
+first stroke and waves in the air through the one on the other side. The
+version before that fitted it between both hands every frame but anchored its
+centre, so it slid along the shaft as the hands opened and closed.
+
+Measured over two cycles: the shaft holds 26.7 units, both hands sit exactly
+on it for 98% of the time, the blade crosses from 25 units one side of the
+boat to 19 the other, and there are exactly two side changes per cycle. The
+blade bottoms out 8 units above the water, so the llama is paddling just shy
+of the surface -- the clip's hands never come low enough for a paddle this
+length to reach it.
+
+When the llama climbs out, `stowOar` puts it back in its oarlock -- left alone
+it keeps the last stroke's transform and hangs in the air over an empty boat.
+The old shader that bent the sculpted llama's forelegs around an oar is gone,
+along with the hand-made dance — the rig does both now.
 
 ## Rigging the llama elsewhere (Mixamo)
 

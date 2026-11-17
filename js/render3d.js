@@ -369,10 +369,28 @@ const SEA_LIFE = {
 
 const ANIMATE_WITHIN = 900;
 
-// Scratch for holdOar, which runs every frame.
+// How the llama holds the paddle. The clip is a canoe stroke that changes
+// sides: the hands sweep across the body and the lower one alternates, left
+// through one stroke and right through the next. The shaft is laid along the
+// line between the hands, so it follows that switch on its own.
+const GRIP = {
+  // Which hand is on the top of the shaft is decided only while one is
+  // clearly above the other. Through the catch and the recovery they are
+  // level to within a unit, and reading the answer off that noise makes the
+  // paddle flip end over end several times a second.
+  decisive: 3.0,
+  // The top hand sits a little down from the very end, so it wraps the grip
+  // instead of pinching the tip.
+  inset: 0.06,
+  // Seconds for the shaft to swing across at a change of sides. The hands
+  // have already crossed by then, so this only softens the last of it.
+  ease: 0.10,
+};
+
+// Scratch for fitOar, which runs every frame.
 const _oarA = new THREE.Vector3(), _oarB = new THREE.Vector3();
-const _oarMid = new THREE.Vector3(), _oarDir = new THREE.Vector3();
-const _oarMat = new THREE.Matrix4(), _oarQ = new THREE.Quaternion();
+const _oarDir = new THREE.Vector3(), _oarPT = new THREE.Vector3();
+const _oarQT = new THREE.Quaternion();
 
 // Scratch for the dancing llama's head, which also runs every frame.
 const _lookP = new THREE.Vector3(), _lookT = new THREE.Vector3(), _lookC = new THREE.Vector3();
@@ -553,52 +571,70 @@ export class Renderer3D {
     this.boatModel.attach(oar);                 // out of the oarlock pivot
     keep.pivot.visible = false;
 
-    // Which way the oar lies in its own space, how long it is, and -- so it
-    // can be held by the right end -- which end is the blade. The blade is the
-    // bulky one: compare how far the two halves spread off the shaft.
-    const box = new THREE.Box3().setFromObject(oar);
-    const size = box.getSize(new THREE.Vector3());
-    const longest = size.x > size.y && size.x > size.z ? 'x' : (size.y > size.z ? 'y' : 'z');
-    const axis = new THREE.Vector3(longest === 'x' ? 1 : 0, longest === 'y' ? 1 : 0, longest === 'z' ? 1 : 0);
-    const centre = box.getCenter(new THREE.Vector3());
-    const spread = [0, 0], count = [0, 0];
+    // Which way the oar lies, how long it is, and -- so it can be held by the
+    // right end -- which end is the blade.
+    //
+    // All of it is measured in the oar's OWN frame and then converted once
+    // into the frame it is positioned in, because the oar node carries a
+    // lopsided scale of its own from the boat model (about 0.27 across the
+    // blade against 2.13 along it). A length taken off the world bounding box
+    // is in different units from an offset applied inside the oar, and mixing
+    // the two sends the blade swinging several body-lengths wide.
+    oar.updateWorldMatrix(true, false);
+    const toOar = new THREE.Matrix4().copy(oar.matrixWorld).invert();
+    const lbox = new THREE.Box3();
     const pv = new THREE.Vector3();
+    const intoOar = new Map();                   // mesh -> its matrix in oar space
     oar.traverse((o) => {
       if (!o.isMesh) return;
+      const m = new THREE.Matrix4().multiplyMatrices(toOar, o.matrixWorld);
+      intoOar.set(o, m);
+      o.geometry.computeBoundingBox();
+      const bb = o.geometry.boundingBox;
+      for (const x of [bb.min.x, bb.max.x])
+        for (const y of [bb.min.y, bb.max.y])
+          for (const z of [bb.min.z, bb.max.z]) lbox.expandByPoint(pv.set(x, y, z).applyMatrix4(m));
+    });
+    const size = lbox.getSize(new THREE.Vector3());
+    const centre = lbox.getCenter(new THREE.Vector3());
+    const longest = size.x > size.y && size.x > size.z ? 'x' : (size.y > size.z ? 'y' : 'z');
+    const axis = new THREE.Vector3(longest === 'x' ? 1 : 0, longest === 'y' ? 1 : 0, longest === 'z' ? 1 : 0);
+    const lengthLocal = Math.max(size.x, size.y, size.z);
+
+    // The blade is the bulky end: compare how far each half spreads off the
+    // shaft. Vertices are stepped through rather than read whole -- it is the
+    // shape that is wanted, not every triangle of it.
+    const spread = [0, 0], count = [0, 0];
+    for (const [o, m] of intoOar) {
       const pos = o.geometry.attributes.position;
       for (let i = 0; i < pos.count; i += 3) {
-        pv.fromBufferAttribute(pos, i);
-        o.localToWorld(pv);
-        const along = pv.dot(axis) - centre.dot(axis);
-        const half = along >= 0 ? 0 : 1;
-        pv.sub(centre);
+        pv.fromBufferAttribute(pos, i).applyMatrix4(m).sub(centre);
+        const half = pv.dot(axis) >= 0 ? 0 : 1;
         pv.addScaledVector(axis, -pv.dot(axis));      // the part off the shaft
         spread[half] += pv.length(); count[half]++;
       }
-    });
-    const bladeAtPlus = (spread[0] / Math.max(1, count[0])) > (spread[1] / Math.max(1, count[1]));
-    if (!bladeAtPlus) axis.negate();                  // +axis now points blade-ward
-    oar.updateWorldMatrix(true, false);
+    }
+    if ((spread[0] / Math.max(1, count[0])) <= (spread[1] / Math.max(1, count[1]))) axis.negate();
+
+    // Into the frame the oar is positioned in. Under the TRS the oar's own
+    // scale is applied before its rotation, so a direction the rotation has
+    // to produce must be the scaled one, not the raw local axis.
+    const S = oar.scale;
+    const axisS = axis.clone().multiply(S);
+    const lengthFit = axisS.length() * lengthLocal;
+    axisS.normalize();
     this.crewHands = {
-      oar, left, right, axis, stowed,
-      centre: oar.worldToLocal(centre.clone()),
-      length: Math.max(size.x, size.y, size.z),
+      oar, left, right, stowed,
+      axis: axisS,                      // shaft direction, pre-rotation
+      centre: centre.multiply(S),       // centre offset, pre-rotation
+      length: lengthFit,                // shaft length, in the parent's units
     };
-    // Lay it across the hands once, at a point in the stroke where they are
-    // holding it, then hand it to the bone. Fitting it between the two hands
-    // every frame made it slide and stretch as their separation changed, which
-    // reads as an oar floating near the llama rather than held by it.
+    // Lay it across the hands at a point in the stroke where they are holding
+    // it, to start from a sane pose, then let fitOar keep it there.
     const u = crew.userData;
     if (u && u.mixer && u.paddle) u.mixer.setTime(u.paddle.getClip().duration * 0.25);
     crew.updateWorldMatrix(true, true);
-    this.holdOar();
-    left.attach(oar);          // keeps the world transform, rides the hand now
-    // The grip, so stowing and un-stowing can put it back exactly.
-    this.crewHands.held = {
-      position: oar.position.clone(),
-      quaternion: oar.quaternion.clone(),
-      scale: oar.scale.clone(),
-    };
+    this.fitOar(0);
   }
 
   // Puts the oar back in its oarlock. Without this it keeps whatever transform
@@ -616,43 +652,77 @@ export class Renderer3D {
       h.oar.scale.copy(w.scale);
       w.pivot.visible = true;
     } else {
-      // Back to the grip it was given, not to wherever it is now: attach()
-      // would preserve the stowed world transform and leave it in the oarlock.
-      h.left.add(h.oar);
-      h.oar.position.copy(h.held.position);
-      h.oar.quaternion.copy(h.held.quaternion);
-      h.oar.scale.copy(h.held.scale);
+      // Back under the boat, where fitOar expects to find it; the next fit
+      // puts it in the hands, so nothing has to remember a pose.
+      this.boatModel.add(h.oar);
+      h.oar.scale.copy(w.scale);
       w.pivot.visible = false;
+      h.swap = 0;                // no handover from a pose two strokes ago
     }
   }
 
-  // Lays the oar along the line between the llama's hands, every frame, so it
-  // tracks whatever the clip is doing without any of it being hand-keyed.
-  holdOar() {
+  // Threads the oar through both of the llama's hands, every frame: the butt
+  // end in the upper hand, the shaft running down through the lower one and
+  // the blade reaching past it to the water. Both ends come from the clip, so
+  // when the stroke changes sides the paddle crosses over with the hands.
+  //
+  // Parenting it rigidly to one hand instead cannot do that -- the offset is
+  // fixed at whatever the pose was when it was handed over, so the blade keeps
+  // pointing wherever it pointed on the first stroke and waves in the air for
+  // the one on the other side.
+  fitOar(dt) {
     const h = this.crewHands;
-    if (!h) return;
+    if (!h || h.isStowed) return;
     const parent = h.oar.parent;
     parent.updateWorldMatrix(true, false);
-    const a = h.left.getWorldPosition(_oarA);
-    const b = h.right.getWorldPosition(_oarB);
-    const mid = _oarMid.copy(a).add(b).multiplyScalar(0.5);
-    const dir = _oarDir.copy(b).sub(a);
+    const L = h.left.getWorldPosition(_oarA);
+    const R = h.right.getWorldPosition(_oarB);
+
+    // Who is on the grip. Decided on world height, where up really is up, and
+    // held through the level stretches rather than recomputed, so the paddle
+    // keeps the sense it had on the stroke it is still finishing.
+    const rise = L.y - R.y;
+    const was = h.topIsLeft;
+    if (h.topIsLeft === undefined || Math.abs(rise) > GRIP.decisive) h.topIsLeft = rise > 0;
+    const swapped = was !== undefined && was !== h.topIsLeft;
+
+    // Everything else happens in the frame the oar is positioned in, so no
+    // length or offset ever has to be converted between the two.
+    parent.worldToLocal(L);
+    parent.worldToLocal(R);
+    const top = h.topIsLeft ? L : R;
+    const low = h.topIsLeft ? R : L;
+    const dir = _oarDir.copy(low).sub(top);
     if (dir.lengthSq() < 1e-8) return;          // hands together: leave it be
     dir.normalize();
-    // The shaft runs through both hands, but which way round is not given by
-    // the hands: pick the end that sends the blade downwards, towards water.
-    if (dir.y > 0) dir.negate();
-    // Then slide it along the shaft so the hands grip near the handle and the
-    // blade reaches past them, rather than the oar being centred on the grip.
-    mid.addScaledVector(dir, h.length * 0.3);
-    // Into the oar's parent frame: the midpoint as a point, the shaft
-    // direction as a direction, which must not pick up the translation.
-    parent.worldToLocal(mid);
-    _oarMat.copy(parent.matrixWorld).invert();
-    _oarQ.setFromRotationMatrix(_oarMat);
-    dir.applyQuaternion(_oarQ).normalize();
-    h.oar.quaternion.setFromUnitVectors(h.axis, dir);
-    h.oar.position.copy(mid).sub(_oarA.copy(h.centre).applyQuaternion(h.oar.quaternion));
+
+    // Where the oar wants to be this frame. The butt end -- not the centre --
+    // goes in the upper hand, so the grip never slides along the shaft as the
+    // hands open and close, and the blade reaches past the lower hand.
+    _oarQT.setFromUnitVectors(h.axis, dir);
+    _oarPT.copy(top).addScaledVector(dir, h.length * GRIP.inset).sub(
+      _oarA.copy(h.centre).addScaledVector(h.axis, -h.length / 2).applyQuaternion(_oarQT));
+
+    // Changing sides turns the paddle end for end, and the two ends share a
+    // line: easing the shaft direction towards its own opposite shortens it to
+    // nothing and then snaps, so the whole placement is cross-faded instead,
+    // which swings the blade over on a definite arc. Every other frame tracks
+    // the hands exactly -- an ease there would only lag them.
+    if (swapped) {
+      h.swap = GRIP.ease;
+      h.q0 = (h.q0 || new THREE.Quaternion()).copy(h.oar.quaternion);
+      h.p0 = (h.p0 || new THREE.Vector3()).copy(h.oar.position);
+    }
+    if (h.swap > 0) {
+      h.swap = Math.max(0, h.swap - dt);
+      const a = 1 - h.swap / GRIP.ease;
+      const e = a * a * (3 - 2 * a);
+      h.oar.quaternion.copy(h.q0).slerp(_oarQT, e);
+      h.oar.position.copy(h.p0).lerp(_oarPT, e);
+    } else {
+      h.oar.quaternion.copy(_oarQT);
+      h.oar.position.copy(_oarPT);
+    }
   }
 
   // Turns the llama's head towards the camera on top of the clip, by `amount`
@@ -1403,6 +1473,8 @@ export class Renderer3D {
       // While it is rowing the crew mixer is ticked here; during the arrival
       // updateCheer ticks the same mixer, so only one of the two ever runs.
       if (this.crewMixer) this.crewMixer.update(dt);
+      // After the clip has posed the hands, never before.
+      this.fitOar(dt);
     }
 
     for (const { o, mesh, baseY } of this.whaleMeshes) {
