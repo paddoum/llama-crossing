@@ -4,6 +4,7 @@
 import { LEVELS } from './levels.js';
 import { Session } from './game.js';
 import { loadProgress, saveProgress } from './storage.js';
+import { addReturnButtons, readExplorerLink } from './explorer.js';
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = ['title', 'levels', 'paused', 'complete', 'gameover'];
@@ -24,6 +25,13 @@ export class App {
     this.toastTimer = 0;
 
     this.bind();
+    // Opened from the Explorer Quest app: a way back to it, with the level reached, on every menu
+    const link = readExplorerLink(window.location.search);
+    this.updateReturn = link
+      ? addReturnButtons(link, SCREENS.map((s) => 'screen-' + s), () => this.progress)
+      : () => {};
+    // The 2D classic keeps the link to the app
+    if (link) document.querySelectorAll('a[href="2d/"]').forEach((a) => { a.href = '2d/' + window.location.search; });
     this.updateMuteLabel();
     this.show('title');
   }
@@ -141,6 +149,7 @@ export class App {
     const isLast = this.levelIndex === LEVELS.length - 1;
     if (!isLast && this.progress.unlocked < this.levelIndex + 2) this.progress.unlocked = this.levelIndex + 2;
     saveProgress(this.progress);
+    this.updateReturn();
 
     $('complete-stars').innerHTML = '★'.repeat(stars) + `<span class="off">${'★'.repeat(3 - stars)}</span>`;
     $('complete-info').textContent = `${s.level.name} · ${s.zapped}/${s.totalSharks} sharks driven off · ${s.boat.hearts} ♥ left` + (isLast ? '\nYou crossed them all!' : '');

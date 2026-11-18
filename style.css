@@ -356,3 +356,6 @@ a.btn { text-decoration: none; display: flex; align-items: center; justify-conte
   .level-card .name { font-size: 12px; }
   .level-card .num { font-size: 21px; }
 }
+
+/* Back to the Explorer Quest app, on every menu when the game was opened from it */
+.btn.eq-return { background: var(--gold, #c8980a); color: #021a3b; }

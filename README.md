@@ -46,6 +46,15 @@ Then open <http://localhost:8001>. To play on your phone, connect it to the same
 
 `devserver.py` is an ordinary static server that sends `Cache-Control: no-store`. Use it rather than `python3 -m http.server`: ES modules are cached per URL, so a plain server will happily leave the page running a mix of edited and cached files, which looks exactly like a bug.
 
+## Explorer Quest link
+
+The Explorer Quest app (mission 09, the Final Crossing) opens the game as `?session=<run>&return=<app page>`. Every
+menu then shows **Back to the Explorer Quest**, which goes to the return address with `?session=<run>&level=<n>`,
+`n` being the highest level completed in the saved progress (0 to 6); the app reports it, and level 6 completes the
+mission. The return address must be one of the app's (`pla2026[-dev|-stage].ar-go.co`, or `localhost` /
+`127.0.0.1` over http), else it is ignored. Without these parameters, the game plays as before. The code is in
+`js/explorer.js`.
+
 ## Controls
 
 - **Phone:** drag anywhere to steer (relative drag — the boat moves by how far your finger travels). **Tap** to spit.
