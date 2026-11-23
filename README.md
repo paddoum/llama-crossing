@@ -30,9 +30,11 @@ Two builds share one simulation:
 | | | |
 |---|---|---|
 | **3D** (default) | `/` | Three.js chase cam, low-poly geometry built in code |
-| **2D classic** | `/2d/` | the original canvas renderer |
+| **2D classic** | `/2d/` | the original canvas renderer, by URL only |
 
-Levels, physics, scoring and saved progress are identical; only the renderer differs.
+Levels, physics, scoring and saved progress are identical; only the renderer
+differs. The title screen no longer links to the 2D build -- it is still
+served, and still playable at `/2d/`, but you have to know it is there.
 
 ## Play locally
 

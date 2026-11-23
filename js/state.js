@@ -30,8 +30,6 @@ export class App {
     this.updateReturn = link
       ? addReturnButtons(link, SCREENS.map((s) => 'screen-' + s), () => this.progress)
       : () => {};
-    // The 2D classic keeps the link to the app
-    if (link) document.querySelectorAll('a[href="2d/"]').forEach((a) => { a.href = '2d/' + window.location.search; });
     this.updateMuteLabel();
     this.show('title');
   }
