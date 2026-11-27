@@ -52,8 +52,8 @@ Then open <http://localhost:8001>. To play on your phone, connect it to the same
 
 The Explorer Quest app (mission 09, the Final Crossing) opens the game as `?session=<run>&return=<app page>`. Every
 menu then shows **Back to the Explorer Quest**, which goes to the return address with `?session=<run>&level=<n>`,
-`n` being the highest level completed in the saved progress (0 to 6); the app reports it, and level 6 completes the
-mission. The return address must be one of the app's (`pla2026[-dev|-stage].ar-go.co`, or `localhost` /
+`n` being the highest level completed in the saved progress (0 to 6); the app reports it, and level 3 completes the
+mission (levels 4 to 6 made easier and worth more points, client, 26 November). The return address must be one of the app's (`pla2026[-dev|-stage].ar-go.co`, or `localhost` /
 `127.0.0.1` over http), else it is ignored. Without these parameters, the game plays as before. The code is in
 `js/explorer.js`.
 

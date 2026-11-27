@@ -10,9 +10,10 @@ export const LEVELS = [
   { name: 'Calm Creek',        length: 2400, speed: 110, riverWidth: 260, meanderAmp: 0,  meanderLen: 900,  gap: [170, 240], weights: { rock: 1, whale: 0, whirlpool: 0 }, maxPerRow: 1, sharkChance: 0.7, seed: 11 },
   { name: 'Log Jam',           length: 3000, speed: 125, riverWidth: 250, meanderAmp: 18, meanderLen: 1000, gap: [150, 220], weights: { rock: 2, whale: 2, whirlpool: 0 }, maxPerRow: 2, sharkChance: 0.65, seed: 22 },
   { name: 'Spinning Shallows', length: 3400, speed: 135, riverWidth: 240, meanderAmp: 30, meanderLen: 900,  gap: [140, 210], weights: { rock: 2, whale: 1, whirlpool: 2 }, maxPerRow: 2, sharkChance: 0.6, seed: 33 },
-  { name: 'The Narrows',       length: 3800, speed: 145, riverWidth: 200, meanderAmp: 40, meanderLen: 800,  gap: [130, 200], weights: { rock: 3, whale: 2, whirlpool: 1 }, maxPerRow: 2, sharkChance: 0.6, seed: 44 },
-  { name: 'Rapids',            length: 4400, speed: 165, riverWidth: 225, meanderAmp: 50, meanderLen: 750,  gap: [120, 185], weights: { rock: 3, whale: 3, whirlpool: 2 }, maxPerRow: 3, sharkChance: 0.55, seed: 55 },
-  { name: 'Final Crossing',    length: 5200, speed: 185, riverWidth: 205, meanderAmp: 60, meanderLen: 700,  gap: [110, 170], weights: { rock: 3, whale: 3, whirlpool: 3 }, maxPerRow: 3, sharkChance: 0.5, seed: 66 },
+  // Levels 4 to 6 made easier (client, 26 November): shorter, slower, a wider river, at most 2 obstacles per row
+  { name: 'The Narrows',       length: 3400, speed: 140, riverWidth: 225, meanderAmp: 30, meanderLen: 900,  gap: [140, 205], weights: { rock: 2, whale: 2, whirlpool: 1 }, maxPerRow: 2, sharkChance: 0.55, seed: 44 },
+  { name: 'Rapids',            length: 3600, speed: 145, riverWidth: 225, meanderAmp: 35, meanderLen: 850,  gap: [135, 200], weights: { rock: 2, whale: 2, whirlpool: 1 }, maxPerRow: 2, sharkChance: 0.55, seed: 55 },
+  { name: 'Final Crossing',    length: 3800, speed: 150, riverWidth: 220, meanderAmp: 40, meanderLen: 800,  gap: [130, 195], weights: { rock: 2, whale: 2, whirlpool: 2 }, maxPerRow: 2, sharkChance: 0.5,  seed: 66 },
 ];
 
 // mulberry32 — small, fast, deterministic.
